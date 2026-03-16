@@ -10,6 +10,25 @@ const __dirname = dirname(__filename);
 
 const app = express();
 
+// ── Simple in-memory cache (5 min TTL) ──────────────────────────
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000;
+
+function getCached(key) {
+  const entry = cache.get(key);
+  if (entry && Date.now() - entry.time < CACHE_TTL) return entry.data;
+  cache.delete(key);
+  return null;
+}
+
+function setCache(key, data) {
+  cache.set(key, { data, time: Date.now() });
+  if (cache.size > 500) {
+    const oldest = cache.keys().next().value;
+    cache.delete(oldest);
+  }
+}
+
 // ── Naver Real Estate API Proxy ──────────────────────────────────
 const NAVER_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -27,11 +46,15 @@ const NAVER_HEADERS = {
 app.get('/api/naver/regions', async (req, res) => {
   try {
     const cortarNo = req.query.cortarNo || '1100000000';
+    const cacheKey = `regions:${cortarNo}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     const url = `https://new.land.naver.com/api/regions/list?cortarNo=${cortarNo}`;
     const resp = await fetch(url, {
       headers: { ...NAVER_HEADERS, 'Referer': 'https://new.land.naver.com/', 'Host': 'new.land.naver.com' },
     });
     const data = await resp.json();
+    setCache(cacheKey, data);
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -42,13 +65,18 @@ app.get('/api/naver/regions', async (req, res) => {
 app.get('/api/naver/articles', async (req, res) => {
   try {
     const params = new URLSearchParams(req.query).toString();
+    const cacheKey = `articles:${params}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     const url = `https://m.land.naver.com/cluster/ajax/articleList?${params}`;
     const resp = await fetch(url, {
       headers: { ...NAVER_HEADERS, 'Referer': 'https://m.land.naver.com/', 'Host': 'm.land.naver.com' },
     });
     const text = await resp.text();
     try {
-      res.json(JSON.parse(text));
+      const data = JSON.parse(text);
+      setCache(cacheKey, data);
+      res.json(data);
     } catch {
       res.status(502).json({ error: 'Invalid response from Naver', raw: text.substring(0, 200) });
     }
@@ -61,13 +89,18 @@ app.get('/api/naver/articles', async (req, res) => {
 app.get('/api/naver/complexes', async (req, res) => {
   try {
     const params = new URLSearchParams(req.query).toString();
+    const cacheKey = `complexes:${params}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     const url = `https://m.land.naver.com/cluster/ajax/complexList?${params}`;
     const resp = await fetch(url, {
       headers: { ...NAVER_HEADERS, 'Referer': 'https://m.land.naver.com/', 'Host': 'm.land.naver.com' },
     });
     const text = await resp.text();
     try {
-      res.json(JSON.parse(text));
+      const data = JSON.parse(text);
+      setCache(cacheKey, data);
+      res.json(data);
     } catch {
       res.status(502).json({ error: 'Invalid response from Naver', raw: text.substring(0, 200) });
     }
@@ -79,11 +112,15 @@ app.get('/api/naver/complexes', async (req, res) => {
 // Proxy: complex detail
 app.get('/api/naver/complex/:complexNo', async (req, res) => {
   try {
+    const cacheKey = `complex:${req.params.complexNo}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     const url = `https://new.land.naver.com/api/complexes/${req.params.complexNo}?sameAddressGroup=false`;
     const resp = await fetch(url, {
       headers: { ...NAVER_HEADERS, 'Referer': `https://new.land.naver.com/complexes/${req.params.complexNo}`, 'Host': 'new.land.naver.com' },
     });
     const data = await resp.json();
+    setCache(cacheKey, data);
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -94,13 +131,18 @@ app.get('/api/naver/complex/:complexNo', async (req, res) => {
 app.get('/api/naver/articles-region', async (req, res) => {
   try {
     const params = new URLSearchParams(req.query).toString();
+    const cacheKey = `articles-region:${params}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     const url = `https://new.land.naver.com/api/articles?${params}`;
     const resp = await fetch(url, {
       headers: { ...NAVER_HEADERS, 'Referer': 'https://new.land.naver.com/', 'Host': 'new.land.naver.com' },
     });
     const text = await resp.text();
     try {
-      res.json(JSON.parse(text));
+      const data = JSON.parse(text);
+      setCache(cacheKey, data);
+      res.json(data);
     } catch {
       res.status(502).json({ error: 'Invalid response from Naver', raw: text.substring(0, 200) });
     }
@@ -113,11 +155,15 @@ app.get('/api/naver/articles-region', async (req, res) => {
 app.get('/api/naver/region-complexes', async (req, res) => {
   try {
     const params = new URLSearchParams(req.query).toString();
+    const cacheKey = `region-complexes:${params}`;
+    const cached = getCached(cacheKey);
+    if (cached) return res.json(cached);
     const url = `https://new.land.naver.com/api/regions/complexes?${params}`;
     const resp = await fetch(url, {
       headers: { ...NAVER_HEADERS, 'Referer': 'https://new.land.naver.com/', 'Host': 'new.land.naver.com' },
     });
     const data = await resp.json();
+    setCache(cacheKey, data);
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
