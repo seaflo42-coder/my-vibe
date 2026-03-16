@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx vite build:*)",
+      "Bash(npx vite:*)",
+      "Bash(lsof:*)",
+      "Bash(curl:*)",
+      "Bash(xargs:*)",
+      "WebFetch(domain:www.framer.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:developers.portone.io)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npm view:*)",
+      "WebFetch(domain:www.codeit.kr)",
+      "Bash(npx create-next-app@latest kdc-product-template --typescript --tailwind --eslint --app --src-dir --no-import-alias --use-npm --turbopack)",
+      "WebSearch",
+      "WebFetch(domain:financedata.github.io)",
+      "WebFetch(domain:leesunkyu94.github.io)",
+      "WebFetch(domain:inasie.github.io)",
+      "WebFetch(domain:velog.io)",
+      "WebFetch(domain:aboda.kr)",
+      "WebFetch(domain:apt-info.github.io)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:wikidocs.net)"
+    ]
+  }
+}
