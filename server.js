@@ -273,7 +273,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   const nets = networkInterfaces();
   let localIp = 'localhost';
