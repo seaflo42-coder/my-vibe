@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-const WS_URL = `ws://${window.location.hostname}:3001`;
+const WS_URL = window.location.hostname === 'localhost'
+  ? `ws://localhost:3001`
+  : `wss://${window.location.host}`;
 
 export function useWebSocket() {
   const [nodes, setNodes] = useState([]);
