@@ -47,14 +47,12 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           TAG="v$VERSION"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.dmg --clobber
-          else
-            gh release create "$TAG" dist/*.dmg --target "$GITHUB_SHA" --title "말끔 $VERSION" \
-              --notes "맥 저장공간 정리 도구 '말끔'. Apple Silicon(M1 이후) 맥은 arm64, 인텔 맥은 x64 파일을 받으세요. 설치 방법은 README를 참고하세요."
-          fi
-          # 0.1.0에는 폴더와 그 안 파일의 중복본을 함께 고르면 모든 사본이 휴지통으로 갈 수 있는 문제가 있었다
+          NOTES="맥 저장공간 정리 도구 '말끔'. Apple Silicon(M1 이후) 맥은 arm64, 인텔 맥은 x64 파일을 받으세요. 설치 방법은 README를 참고하세요."
+          # 같은 버전이 이미 있으면 파일만 교체한다 (두 브랜치가 동시에 빌드해도 실패하지 않도록)
+          gh release create "$TAG" dist/*.dmg --target "$GITHUB_SHA" --title "말끔 $VERSION" --notes "$NOTES" \
+            || gh release upload "$TAG" dist/*.dmg --clobber
+          # 0.1.0에는 폴더와 그 안 파일의 중복본을 함께 고르면 모든 사본이 휴지통으로 갈 수 있는 문제가 있어
+          # 새 버전이 올라간 뒤 내려받기에서 지운다
           if [ "$TAG" != "v0.1.0" ] && gh release view v0.1.0 >/dev/null 2>&1; then
-            gh release edit v0.1.0 --title "말끔 0.1.0 (사용하지 마세요 — 0.1.1 이상을 받으세요)" \
-              --notes "이 버전에는 폴더와 그 안에 든 파일의 중복본을 함께 고르면 사본이 모두 휴지통으로 이동할 수 있는 문제가 있습니다. 0.1.1 이상을 설치해 주세요. 이미 정리했다면 휴지통을 비우지 말고 필요한 파일을 꺼내세요."
+            gh release delete v0.1.0 --yes --cleanup-tag
           fi
