@@ -21,7 +21,7 @@ const { makeHome } = require('./fixture');
     const page = await app.firstWindow();
     page.on('pageerror', (e) => errors.push(String(e)));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-    await page.setViewportSize({ width: 1120, height: 820 });
+    await page.setViewportSize({ width: 1160, height: 800 });
     const shot = async (name) => { if (shots) await page.screenshot({ path: path.join(shots, name + '.png') }); };
 
     await page.waitForSelector('#scanBtn');

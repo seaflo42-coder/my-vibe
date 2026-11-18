@@ -27,15 +27,15 @@ function accentHex() {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1120,
-    height: 760,
-    minWidth: 860,
+    width: 1160,
+    height: 800,
+    minWidth: 900,
     minHeight: 600,
     title: '말끔',
-    // 맥에서는 제목 막대를 숨기고 신호등 버튼만 남기며, 사이드바 뒤로 바탕이 비치는 반투명 재질을 쓴다
+    // 맥에서는 제목 막대를 숨기고, 창 전체가 뒤의 바탕화면을 흐리게 비추는 유리 재질이 된다
     ...(IS_MAC
-      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 19, y: 18 }, vibrancy: 'sidebar', visualEffectState: 'followWindow', backgroundColor: '#00000000' }
-      : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ffffff' }),
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 20 }, vibrancy: 'under-window', visualEffectState: 'active', backgroundColor: '#00000000' }
+      : { backgroundColor: '#15161d' }),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -205,6 +205,7 @@ function buildMenu() {
 }
 
 app.whenReady().then(() => {
+  nativeTheme.themeSource = 'dark'; // 유리 위의 밝은 글자가 항상 잘 보이도록 어두운 재질로 고정
   buildMenu();
   createWindow();
   if (IS_MAC) systemPreferences.on('accent-color-changed', () => send('app:accent-changed', accentHex()));

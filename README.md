@@ -68,7 +68,7 @@ npm run dist     # 맥에서 .dmg 만들기
 
 화면 디자인을 스티치로 다듬을 수 있게 준비해 두었습니다.
 
-- 화면 디자인 기준은 `DESIGN.md`에 있습니다 (macOS 화면 규칙을 따름).
+- 화면 디자인 기준은 `DESIGN.md`에 있습니다 (리퀴드 글래스 + visionOS 방식).
 - 스티치 스킬 11개가 `.claude/skills/`에 설치되어 있습니다. (출처: [google-labs-code/stitch-skills](https://github.com/google-labs-code/stitch-skills), Apache-2.0)
 - 스티치 MCP 연결 설정이 `.mcp.json`에 들어 있습니다. **API 키만 넣으면 연결됩니다.**
   1. [stitch.withgoogle.com](https://stitch.withgoogle.com) 로그인 → 프로필 → **Stitch settings → API key → Create key**

@@ -107,9 +107,9 @@
     const s = document.createElementNS(NS, 'svg');
     s.setAttribute('viewBox', '0 0 56 56'); s.setAttribute('class', 'appicon'); s.setAttribute('aria-hidden', 'true');
     const r = document.createElementNS(NS, 'rect');
-    r.setAttribute('width', '56'); r.setAttribute('height', '56'); r.setAttribute('rx', '13'); r.setAttribute('fill', 'var(--accent)');
+    r.setAttribute('width', '56'); r.setAttribute('height', '56'); r.setAttribute('rx', '13'); r.setAttribute('fill', 'rgba(255,255,255,.94)');
     const p = document.createElementNS(NS, 'path');
-    p.setAttribute('d', 'M17 29l8 8 14-17'); p.setAttribute('fill', 'none'); p.setAttribute('stroke', '#fff');
+    p.setAttribute('d', 'M17 29l8 8 14-17'); p.setAttribute('fill', 'none'); p.setAttribute('stroke', '#15161d');
     p.setAttribute('stroke-width', '5'); p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round');
     s.append(r, p);
     return s;
@@ -297,16 +297,9 @@
       { id: 'dups', label: '중복 파일', icon: I.copy, badge: r && r.groups.length ? fmt(r.summary.dupWasted) : null },
       { id: 'reco', label: '정리 추천', icon: I.spark, badge: r && r.summary.recoTotal ? fmt(r.summary.recoTotal) : null },
     ];
-    $('nav').replaceChildren(h('div', { class: 'side-title' }, '말끔'), ...items.map((it) =>
+    $('nav').replaceChildren(...items.map((it) =>
       h('button', { class: 'nav-item', 'aria-current': S.view === it.id ? 'page' : null, onclick: () => go(it.id) },
-        icon(it.icon), h('span', { class: 'label' }, it.label), it.badge && h('span', { class: 'badge' }, it.badge))));
-    const d = S.disk;
-    if (d.total) {
-      $('sideDisk').replaceChildren(
-        h('div', { class: 'name' }, icon(I.disk), '이 Mac'),
-        storageBar('mini'),
-        h('div', { class: 'num' }, `${fmt(d.total)} 중 ${fmt(d.free)} 사용 가능`));
-    } else $('sideDisk').replaceChildren();
+        icon(it.icon), h('span', { class: 'label' }, it.label))));
   }
 
   // ---------- 그리기: 도구 막대 ----------
@@ -346,6 +339,10 @@
   function tag(safety) {
     return h('span', { class: 'tag ' + safety }, safety === 'safe' ? '지워도 안전' : '확인 후 삭제');
   }
+  function bigNum(text) {
+    const m = text.match(/^([\d.]+)(\D+)$/) || [null, text, ''];
+    return h('span', { class: 'free' }, m[1], h('small', {}, m[2]));
+  }
   function viewHome() {
     const d = S.disk;
     const r = S.scanning ? null : S.result;
@@ -362,10 +359,11 @@
     const box = h('div', { class: 'box' },
       h('div', { class: 'storage' },
         h('div', { class: 'storage-head' },
-          h('span', { class: 'disk' }, '이 Mac'),
+          bigNum(fmt(d.free)),
+          h('span', { class: 'freelabel' }, '사용 가능'),
           freePct < 0.1 && h('span', { class: 'tag low' }, '공간이 많이 부족해요'),
           freePct >= 0.1 && freePct < 0.2 && h('span', { class: 'tag review' }, '공간이 줄어들고 있어요'),
-          h('span', { class: 'cap' }, `${fmt(d.total)} 중 ${fmt(d.free)} 사용 가능`)),
+          h('span', { class: 'cap' }, `이 Mac · 전체 ${fmt(d.total)}`)),
         storageBar('sbar'), legend));
     if (S.scanning) box.append(h('div', { class: 'progress', id: 'progress' }));
     else if (r) {
@@ -451,7 +449,7 @@
 
   // ---------- 그리기: 빈 화면 · 파일 줄 ----------
   function emptyState(ic, title, body, withScan) {
-    return h('div', { class: 'empty' }, icon(ic), h('h2', {}, title), h('p', {}, body),
+    return h('div', { class: 'empty' }, h('div', { class: 'orb' }, icon(ic)), h('h2', {}, title), h('p', {}, body),
       withScan && h('button', { class: 'btn primary', onclick: startScan }, '검사 시작'));
   }
   function fileRow(item, { keepBadge, onToggle } = {}) {
@@ -565,7 +563,7 @@
     if (!n) return;
     bar.replaceChildren(
       h('div', { class: 'info num' }, h('b', {}, `${nf.format(n)}개 항목 선택됨`), h('span', {}, `${fmt(selTotal())} 정리 예정`)),
-      h('button', { class: 'btn', disabled: S.busy, onclick: () => { S.selected.clear(); render(); } }, '선택 해제'),
+      h('button', { class: 'btn plain', disabled: S.busy, onclick: () => { S.selected.clear(); render(); } }, '선택 해제'),
       h('button', { class: 'btn primary', id: 'trashBtn', disabled: S.busy, onclick: trashSelected }, S.busy ? '옮기는 중…' : '휴지통으로 이동'));
   }
   function render() { renderSide(); renderMain(); renderBar(); }
