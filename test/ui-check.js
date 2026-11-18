@@ -21,14 +21,14 @@ const { makeHome } = require('./fixture');
     const page = await app.firstWindow();
     page.on('pageerror', (e) => errors.push(String(e)));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-    await page.setViewportSize({ width: 1120, height: 760 });
+    await page.setViewportSize({ width: 1120, height: 820 });
     const shot = async (name) => { if (shots) await page.screenshot({ path: path.join(shots, name + '.png') }); };
 
     await page.waitForSelector('#scanBtn');
     await shot('1-home');
     await page.click('#scanBtn');
     await page.waitForSelector('.summary', { timeout: 60000 });
-    await shot('2-result');
+    await page.waitForTimeout(900); await shot('2-result');
 
     // 중복 파일
     await page.click('.nav-item:has-text("중복 파일")');

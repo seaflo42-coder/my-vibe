@@ -18,6 +18,7 @@
     openCats: new Set(),
     catShown: {},
     busy: false,
+    animate: true,        // 화면이 바뀔 때만 등장 효과를 준다
   };
 
   // ---------- 작은 도구들 ----------
@@ -62,6 +63,8 @@
     chev: 'M9 6l6 6-6 6',
     check: 'M5 12.5l4.5 4.5L19 7.5',
     search: 'M11 4a7 7 0 100 14 7 7 0 000-14z|M20 20l-4-4',
+    shield: 'M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z|M9 12l2 2 4-4',
+    eye: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z|M12 9a3 3 0 100 6 3 3 0 000-6z',
   };
 
   function fmt(bytes) {
@@ -114,7 +117,7 @@
   // ---------- 검사 ----------
   async function startScan() {
     S.scanning = true; S.error = null; S.result = null; S.progress = { phase: 'walk', files: 0 };
-    S.selected.clear(); S.dupShown = 40; S.catShown = {}; S.view = 'home';
+    S.selected.clear(); S.dupShown = 40; S.catShown = {}; S.view = 'home'; S.animate = true;
     render();
     await api.startScan({ roots: S.roots, minDupSize: S.minDupSize });
   }
@@ -125,7 +128,7 @@
   }
   api.onScanProgress((p) => { if (S.scanning) { S.progress = p; renderProgress(); } });
   api.onScanDone((r) => {
-    S.scanning = false; S.progress = null;
+    S.scanning = false; S.progress = null; S.animate = true;
     if (r) {
       S.result = r;
       S.openCats = new Set(r.categories.slice(0, 1).map((c) => c.id));
@@ -252,16 +255,30 @@
     $('nav').replaceChildren(...items.map((it) =>
       h('button', {
         class: 'nav-item', 'aria-current': S.view === it.id ? 'page' : null,
-        onclick: () => { S.view = it.id; render(); $('main').scrollTop = 0; },
+        onclick: () => go(it.id),
       }, icon(it.icon), h('span', { class: 'label' }, it.label), it.badge && h('span', { class: 'badge num' }, it.badge))));
     const d = S.disk;
     if (d.total) {
-      const usedPct = Math.min(100, Math.max(0, (1 - d.free / d.total) * 100));
       $('sideDisk').replaceChildren(
-        h('div', {}, '남은 공간 ', h('b', { class: 'num' }, fmt(d.free))),
-        h('div', { class: 'meter ' + level(d) }, h('i', { style: `width:${usedPct}%` })),
-        h('div', { class: 'num' }, `전체 ${fmt(d.total)}`));
+        h('div', { class: 'line' }, h('span', {}, '남은 공간'), h('b', { class: 'num' }, fmt(d.free))),
+        storageBar('mini'),
+        h('div', { class: 'line' }, h('span', {}, '전체'), h('span', { class: 'num' }, fmt(d.total))));
     } else $('sideDisk').replaceChildren();
+  }
+  // 되찾을 수 있는 공간(중복 + 추천). 서로 겹칠 수 있어 "최대"로만 안내한다.
+  function reclaimable() {
+    const r = S.result;
+    if (!r) return 0;
+    return Math.min(r.summary.dupWasted + r.summary.recoTotal, Math.max(0, S.disk.total - S.disk.free));
+  }
+  function storageBar(cls) {
+    const d = S.disk;
+    const gain = reclaimable();
+    const used = Math.max(0, d.total - d.free - gain);
+    return h('div', { class: `${cls} ${level(d)}` },
+      h('i', { class: 'used', style: `flex:${used} 1 0` }),
+      gain > 0 && h('i', { class: 'gainseg', style: `flex:${gain} 1 0` }),
+      h('i', { class: 'free', style: `flex:${Math.max(d.free, 1)} 1 0` }));
   }
   function level(d) {
     const freePct = d.total ? d.free / d.total : 1;
@@ -269,68 +286,103 @@
   }
 
   // ---------- 그리기: 개요 ----------
+  function go(view, openCat) {
+    S.view = view; S.animate = true;
+    if (openCat) S.openCats = new Set([openCat]);
+    render();
+    $('main').scrollTop = 0;
+  }
+  function bigNum(cls, text, prefix) {
+    const m = text.match(/^([\d.]+)(\D+)$/) || [null, text, ''];
+    return h('div', { class: cls }, (prefix || '') + m[1], h('small', {}, m[2]));
+  }
   function viewHome() {
     const d = S.disk;
-    const usedPct = d.total ? Math.min(100, (1 - d.free / d.total) * 100) : 0;
+    const r = S.scanning ? null : S.result;
     const lv = level(d);
-    const freeTxt = fmt(d.free);
-    const m = freeTxt.match(/^([\d.]+)(\D+)$/) || [null, freeTxt, ''];
-    const hero = h('div', { class: 'card hero' },
-      h('div', { class: 'hero-top' },
-        h('div', { class: 'hero-free num' }, m[1], h('small', {}, m[2])),
-        h('span', { class: 'hero-cap' }, '남았어요'),
-        lv === 'low' && h('span', { class: 'pill low' }, '공간이 많이 부족해요'),
-        lv === 'mid' && h('span', { class: 'pill review' }, '공간이 줄어들고 있어요')),
-      h('div', { class: 'meter ' + lv }, h('i', { style: `width:${usedPct}%` })),
-      h('div', { class: 'hero-legend num' },
-        h('span', {}, `사용 중 ${fmt(d.total - d.free)}`), h('span', {}, `전체 ${fmt(d.total)}`)));
+    const gain = reclaimable();
 
-    const box = h('div', { class: 'card scan-box' });
+    let side;
     if (S.scanning) {
-      box.append(h('div', { class: 'progress', id: 'progress' }));
+      side = h('div', { class: 'hero-side progress', id: 'progress' });
+    } else if (r) {
+      side = h('div', { class: 'hero-side' },
+        h('div', { class: 'eyebrow' }, '정리하면 최대'),
+        bigNum('gain', fmt(gain), '+'),
+        h('p', {}, `파일 ${nf.format(r.summary.files)}개를 ${Math.max(1, Math.round(r.summary.elapsedMs / 1000))}초 동안 살펴봤어요. 아래에서 지울 것을 직접 고르세요.`),
+        h('button', { class: 'btn', id: 'scanBtn', onclick: startScan }, icon(I.search), '다시 검사'));
     } else {
-      const r = S.result;
-      box.append(h('div', { class: 'scan-row' },
-        h('div', { class: 'grow' },
-          h('h2', {}, r ? '검사를 마쳤어요' : '무엇을 정리할 수 있는지 찾아볼게요'),
-          h('p', {}, r
-            ? `파일 ${nf.format(r.summary.files)}개를 ${Math.max(1, Math.round(r.summary.elapsedMs / 1000))}초 동안 살펴봤어요.`
-            : '검사만으로는 아무것도 지워지지 않아요. 결과를 보고 직접 고르면 돼요.')),
-        h('button', { class: 'btn primary ' + (r ? '' : 'big'), id: 'scanBtn', onclick: startScan }, icon(I.search), r ? '다시 검사' : '검사 시작')));
-      box.append(h('div', { class: 'opts' },
-        h('div', {},
-          h('div', { class: 'opt-label' }, '검사할 곳'),
-          h('div', { class: 'seg' },
-            h('button', { 'aria-pressed': String(!S.roots.length), onclick: () => { S.roots = []; renderMain(); } }, '홈 폴더 전체'),
-            h('button', { 'aria-pressed': String(!!S.roots.length), onclick: pickFolders }, '폴더 직접 선택…')),
-          S.roots.length ? h('div', { class: 'chips' }, S.roots.map((p) => h('span', { class: 'chip', title: p }, split(p + '/x').dir))) : null),
-        h('div', {},
-          h('div', { class: 'opt-label' }, '중복으로 볼 최소 크기'),
-          h('div', { class: 'seg' }, [[100e3, '100KB'], [1e6, '1MB'], [10e6, '10MB']].map(([v, l]) =>
-            h('button', { 'aria-pressed': String(S.minDupSize === v), onclick: () => { S.minDupSize = v; renderMain(); } }, l))))));
+      side = h('div', { class: 'hero-side' },
+        h('div', { class: 'eyebrow' }, '시작하기'),
+        h('h2', {}, '무엇을 정리할 수 있는지 찾아볼게요'),
+        h('p', {}, '검사만으로는 아무것도 지워지지 않아요. 결과를 보고 직접 고르면 돼요.'),
+        h('button', { class: 'btn primary big', id: 'scanBtn', onclick: startScan }, icon(I.search), '검사 시작'));
     }
 
-    const out = [h('div', { class: 'page-head' }, h('div', { class: 'grow' }, h('h1', {}, '저장공간 개요'), h('p', {}, '중복 파일과 지워도 되는 파일을 찾아 공간을 되찾아요.'))), hero, box];
+    const hero = h('div', { class: 'card hero' },
+      h('div', { class: 'hero-grid' },
+        h('div', {},
+          h('div', { class: 'eyebrow' }, '남은 공간'),
+          bigNum('hero-free', fmt(d.free)),
+          h('div', { class: 'hero-status' },
+            lv === 'low' && h('span', { class: 'pill low' }, '공간이 많이 부족해요'),
+            lv === 'mid' && h('span', { class: 'pill review' }, '공간이 줄어들고 있어요'),
+            h('span', { class: 'num' }, `전체 ${fmt(d.total)}`))),
+        side),
+      h('div', { class: 'storage' },
+        storageBar('sbar'),
+        h('div', { class: 'legend' },
+          h('span', { class: 'k-used' }, h('i'), '사용 중 ', h('b', { class: 'num' }, fmt(d.total - d.free - gain))),
+          gain > 0 && h('span', { class: 'k-gain' }, h('i'), '되찾을 수 있는 공간 ', h('b', { class: 'num' }, fmt(gain))),
+          h('span', {}, h('i'), '남은 공간 ', h('b', { class: 'num' }, fmt(d.free))))));
+
+    const out = [h('div', { class: 'page-head' }, h('h1', {}, '저장공간'), h('p', {}, '중복 파일과 지워도 되는 파일을 찾아 공간을 되찾아요.')), hero];
     if (S.error) out.push(h('div', { class: 'note warn' }, h('span', { class: 'grow' }, `검사 중 문제가 생겼어요: ${S.error}`), h('button', { class: 'btn small', onclick: startScan }, '다시 시도')));
 
-    const r = S.result;
-    if (r && !S.scanning) {
-      out.push(h('div', { class: 'summary' },
-        h('button', { class: 'card sum-card', onclick: () => { S.view = 'dups'; render(); } },
-          h('div', { class: 'k' }, '중복 파일'),
-          h('div', { class: 'v num' }, fmt(r.summary.dupWasted)),
-          h('div', { class: 'd' }, r.groups.length ? `똑같은 파일 ${nf.format(r.summary.dupFiles)}개를 지울 수 있어요` : '중복된 파일이 없어요'),
-          h('span', { class: 'go' }, '확인하기 →')),
-        h('button', { class: 'card sum-card', onclick: () => { S.view = 'reco'; render(); } },
-          h('div', { class: 'k' }, '정리 추천'),
-          h('div', { class: 'v num' }, fmt(r.summary.recoTotal)),
-          h('div', { class: 'd' }, r.categories.length ? `${r.categories.length}가지 종류에서 찾았어요` : '추천할 항목이 없어요'),
-          h('span', { class: 'go' }, '확인하기 →'))));
+    if (S.scanning) {
+      out.push(h('div', { class: 'section' },
+        h('div', { class: 'section-head' }, h('h2', {}, '되찾을 수 있는 공간'), h('span', { class: 'grow' }), h('span', { class: 'side' }, '찾는 중이에요')),
+        [0, 1, 2, 3].map(() => h('div', { class: 'skel' }, h('i'), h('i'), h('i')))));
+    } else if (r) {
+      const rows = [{ title: '중복 파일', safety: 'safe', pill: null, total: r.summary.dupWasted,
+        desc: r.groups.length ? `똑같은 파일 ${nf.format(r.summary.dupFiles)}개를 지울 수 있어요` : '중복된 파일이 없어요', run: () => go('dups') }]
+        .concat(r.categories.map((c) => ({ title: c.title, safety: c.safety, pill: c.safety, total: c.total, unknown: c.unknownSize, desc: c.desc, run: () => go('reco', c.id) })));
+      const max = Math.max(1, ...rows.map((x) => x.total));
+      out.push(h('div', { class: 'section summary' },
+        h('div', { class: 'section-head' }, h('h2', {}, '되찾을 수 있는 공간'), h('span', { class: 'grow' }), h('span', { class: 'side' }, '눌러서 자세히 보기')),
+        rows.map((x) => h('button', { class: 'brk ' + x.safety, onclick: x.run },
+          h('div', {},
+            h('div', { class: 't' }, x.title, x.pill && h('span', { class: 'pill ' + x.pill }, x.pill === 'safe' ? '지워도 안전' : '확인 후 삭제')),
+            h('div', { class: 'd' }, x.desc)),
+          h('div', { class: 'track' }, h('i', { style: `transform:scaleX(${Math.max(x.total ? 0.02 : 0, x.total / max)})` })),
+          h('div', { class: 'v num' }, x.unknown ? '확인 불가' : fmt(x.total)),
+          icon(I.chev)))));
       if (r.summary.denied.length) {
         out.push(h('div', { class: 'note warn' },
           h('span', { class: 'grow' }, `폴더 ${nf.format(r.summary.denied.length)}곳은 권한이 없어 건너뛰었어요. 더 꼼꼼히 찾으려면 '전체 디스크 접근 권한'에서 말끔을 켜 주세요.`),
           h('button', { class: 'btn small', onclick: () => api.openPrivacySettings() }, '설정 열기')));
       }
+    } else {
+      out.push(h('div', { class: 'section' },
+        h('div', { class: 'section-head' }, h('h2', {}, '검사하면 찾아주는 것')),
+        [[I.copy, '중복 파일', '이름이 달라도 내용이 완전히 같은 파일을 묶어서 보여줘요.'],
+          [I.shield, '지워도 안전한 것', '휴지통, 설치 파일, 앱 임시 파일처럼 없어도 되는 것들이에요.'],
+          [I.eye, '확인하고 지울 것', '오래된 다운로드, 용량이 큰 파일, 기기 백업을 골라 보여줘요.']].map(([ic, t, dsc]) =>
+          h('div', { class: 'brk plain' }, icon(ic), h('div', {}, h('div', { class: 't' }, t), h('div', { class: 'd' }, dsc))))));
+    }
+
+    if (!S.scanning) {
+      out.push(h('div', { class: 'settings' },
+        h('div', {},
+          h('div', { class: 'eyebrow opt-label' }, '검사할 곳'),
+          h('div', { class: 'seg' },
+            h('button', { 'aria-pressed': String(!S.roots.length), onclick: () => { S.roots = []; renderMain(); } }, '홈 폴더 전체'),
+            h('button', { 'aria-pressed': String(!!S.roots.length), onclick: pickFolders }, '폴더 직접 선택…')),
+          S.roots.length ? h('div', { class: 'chips' }, S.roots.map((p) => h('span', { class: 'chip num', title: p }, split(p + '/x').dir))) : null),
+        h('div', {},
+          h('div', { class: 'eyebrow opt-label' }, '중복으로 볼 최소 크기'),
+          h('div', { class: 'seg' }, [[100e3, '100KB'], [1e6, '1MB'], [10e6, '10MB']].map(([v, l]) =>
+            h('button', { class: 'num', 'aria-pressed': String(S.minDupSize === v), onclick: () => { S.minDupSize = v; renderMain(); } }, l))))));
     }
     out.push(h('p', { class: 'meta' }, '시스템 파일, 앱, 사진 보관함, 숨김 폴더는 검사하지도 지우지도 않아요.'));
     return out;
@@ -348,30 +400,31 @@
     const idx = order.indexOf(p.phase);
     let title; let sub = ''; let pct = null;
     if (p.phase === 'walk') {
-      title = `파일을 살펴보는 중 · ${nf.format(p.files || 0)}개`;
+      title = `파일 ${nf.format(p.files || 0)}개를 살펴봤어요`;
       sub = p.current || '';
     } else if (p.phase === 'hash') {
-      title = '똑같은 파일인지 비교하는 중';
-      if (p.total) pct = Math.min(100, (p.done / p.total) * (p.step === 'quick' ? 15 : 85) + (p.step === 'quick' ? 0 : 15));
+      title = '똑같은 파일인지 비교하고 있어요';
+      if (p.total) pct = p.step === 'quick' ? (p.done / p.total) * 0.15 : 0.15 + (p.done / p.total) * 0.85;
       sub = p.step === 'full' ? `${fmt(p.done)} / ${fmt(p.total)}` : '';
     } else {
-      title = '정리할 만한 항목을 찾는 중';
+      title = '정리할 만한 항목을 찾고 있어요';
       sub = p.label || '';
     }
     el.replaceChildren(
-      h('div', { class: 'scan-row' },
-        h('div', { class: 'grow', style: 'min-width:0' }, h('h2', { class: 'num' }, title), h('div', { class: 'sub num' }, '‎' + sub)),
-        h('button', { class: 'btn', onclick: cancelScan }, '중단')),
-      h('div', { class: 'bar' + (pct == null ? ' indet' : '') }, h('i', { style: pct == null ? '' : `width:${pct}%` })),
-      h('div', { class: 'steps' }, ['파일 살펴보기', '중복 비교', '정리 추천'].map((l, i) =>
-        h('span', { class: i === idx ? 'on' : i < idx ? 'done' : '' }, `${i + 1}. ${l}`))));
+      h('div', { class: 'eyebrow' }, `검사 중 · ${idx + 1} / 3`),
+      h('h2', {}, title),
+      h('div', { class: 'sub num' }, '‎' + sub),
+      h('div', { class: 'bar' + (pct == null ? ' indet' : '') }, h('i', { style: pct == null ? '' : `transform:scaleX(${Math.min(1, pct)})` })),
+      h('div', { class: 'steps' }, ['살펴보기', '중복 비교', '정리 추천'].map((l, i) =>
+        h('span', { class: i === idx ? 'on' : i < idx ? 'done' : '' }, l))),
+      h('button', { class: 'btn small', onclick: cancelScan }, '검사 중단'));
   }
 
   // ---------- 그리기: 빈 화면 ----------
   function emptyState(title, body, withScan) {
-    return h('div', { class: 'empty' }, icon(withScan ? I.search : I.check),
-      h('h2', {}, title), h('p', {}, body),
-      withScan && h('div', {}, h('button', { class: 'btn primary', onclick: startScan }, '검사 시작')));
+    return h('div', { class: 'empty' }, h('div', { class: 'mark' }, icon(withScan ? I.search : I.check)),
+      h('div', {}, h('h2', {}, title), h('p', {}, body),
+        withScan && h('button', { class: 'btn primary', onclick: startScan }, icon(I.search), '검사 시작')));
   }
   function fileRow(item, { keepBadge, onToggle, canCheck = true } = {}) {
     const { dir, name } = split(item.path);
@@ -388,15 +441,15 @@
 
   // ---------- 그리기: 중복 파일 ----------
   function viewDups() {
-    const head = h('div', { class: 'page-head' }, h('div', { class: 'grow' }, h('h1', {}, '중복 파일'),
-      h('p', {}, '내용이 한 글자도 다르지 않은 파일끼리 묶었어요. 묶음마다 하나는 꼭 남겨요.')));
+    const head = h('div', { class: 'page-head' }, h('h1', {}, '중복 파일'),
+      h('p', {}, '내용이 한 글자도 다르지 않은 파일끼리 묶었어요. 묶음마다 하나는 꼭 남겨요.'));
     if (S.scanning) return [head, emptyState('검사하는 중이에요', '끝나면 여기에 결과가 나타나요.')];
     if (!S.result) return [head, emptyState('아직 검사하지 않았어요', '검사를 하면 똑같은 파일을 찾아드려요.', true)];
     const groups = S.result.groups;
     if (!groups.length) return [head, emptyState('중복된 파일이 없어요', '똑같은 파일을 찾지 못했어요. 깔끔하네요!')];
 
     const out = [head, h('div', { class: 'toolbar' },
-      h('span', {}, `묶음 ${nf.format(groups.length)}개 · 최대 ${fmt(S.result.summary.dupWasted)} 절약`),
+      h('span', { class: 'num' }, `묶음 ${nf.format(groups.length)}개 · 최대 ${fmt(S.result.summary.dupWasted)} 절약`),
       h('span', { class: 'grow' }),
       h('span', {}, '자동 선택'),
       h('button', { class: 'btn small', onclick: () => autoSelect('oldest') }, '가장 오래된 것만 남기기'),
@@ -405,11 +458,11 @@
 
     for (const g of groups.slice(0, S.dupShown)) {
       const picked = g.files.filter((f) => S.selected.has(f.path)).length;
-      const card = h('div', { class: 'card group' },
+      const card = h('div', { class: 'group' },
         h('div', { class: 'group-head' },
           h('div', { class: 'grow' },
-            h('div', { class: 'title' }, split(g.files[0].path).name),
-            h('div', { class: 'sub num' }, `똑같은 파일 ${g.files.length}개 · 각 ${fmt(g.size)}`)),
+            h('span', { class: 'title' }, split(g.files[0].path).name),
+            h('span', { class: 'sub num' }, `${g.files.length}개 · 각 ${fmt(g.size)}`)),
           h('div', { class: 'save num' }, picked ? `${fmt(picked * g.size)} 선택됨` : `${fmt(g.wasted)} 절약 가능`)),
         g.files.map((f) => fileRow(f, {
           keepBadge: picked > 0,
@@ -433,8 +486,8 @@
 
   // ---------- 그리기: 정리 추천 ----------
   function viewReco() {
-    const head = h('div', { class: 'page-head' }, h('div', { class: 'grow' }, h('h1', {}, '정리 추천'),
-      h('p', {}, '지워도 괜찮은 것부터 순서대로 보여드려요. 원하는 것만 골라서 정리하세요.')));
+    const head = h('div', { class: 'page-head' }, h('h1', {}, '정리 추천'),
+      h('p', {}, '지워도 괜찮은 것부터 순서대로 보여드려요. 원하는 것만 골라서 정리하세요.'));
     if (S.scanning) return [head, emptyState('검사하는 중이에요', '끝나면 여기에 결과가 나타나요.')];
     if (!S.result) return [head, emptyState('아직 검사하지 않았어요', '검사를 하면 지워도 되는 파일을 추천해 드려요.', true)];
     const cats = S.result.categories;
@@ -444,7 +497,7 @@
     for (const c of cats) {
       const open = S.openCats.has(c.id);
       const picked = c.items.filter((i) => S.selected.has(i.path));
-      const card = h('div', { class: 'card group cat' + (open ? ' open' : '') },
+      const card = h('div', { class: 'group cat' + (open ? ' open' : '') },
         h('button', { class: 'cat-head', 'aria-expanded': String(open), onclick: () => { open ? S.openCats.delete(c.id) : S.openCats.add(c.id); renderMain(true); } },
           icon(I.chev, 'chev'),
           h('div', { class: 'grow' },
@@ -486,7 +539,8 @@
     const main = $('main');
     const top = main.scrollTop;
     const kids = S.view === 'dups' ? viewDups() : S.view === 'reco' ? viewReco() : viewHome();
-    main.replaceChildren(h('div', { class: 'wrap' }, kids));
+    main.replaceChildren(h('div', { class: 'wrap' + (S.animate ? ' stagger' : '') }, kids));
+    S.animate = false;
     if (keepScroll !== false) main.scrollTop = top;
     renderProgress();
   }
