@@ -547,8 +547,7 @@
     if (!ok) api.reveal(path);
   }
   /** 파일 한 줄. 화면마다 강조할 내용이 달라서 primary/secondary는 호출하는 쪽이 정한다. */
-  function fileRow(item, { primary, secondary, badge, showThumb = true, onToggle }) {
-    const on = S.selected.has(item.path);
+  function fileRow(item, { primary, secondary, badge, showThumb = true, onToggle, on = S.selected.has(item.path) }) {
     return h('label', { class: 'row' + (on ? ' picked' : ''), ondblclick: (e) => { e.preventDefault(); preview(item.path); } },
       h('input', { type: 'checkbox', checked: on, 'aria-label': `${primary} 선택`, onchange: (e) => onToggle(e.target.checked, e.target) }),
       showThumb && thumb(item.path, item.isDir),
@@ -567,8 +566,11 @@
     if (!groups.length) return [emptyState('done', '중복된 파일이 없어요', '똑같은 파일을 찾지 못했어요.')];
 
     const out = [h('p', { class: 'lead' }, '내용이 한 글자도 다르지 않은 파일끼리 묶었어요. 어디에 있는 파일을 지울지 고르세요. 묶음마다 하나는 꼭 남아요.')];
+    // 폴더를 고르면 그 안의 파일도 함께 사라지므로, "고른 것"에는 고른 폴더 안의 파일도 포함해서 따진다
+    const chosen = [...S.selected.keys()];
+    const gone = (p) => S.selected.has(p) || chosen.some((k) => p.startsWith(k + '/'));
     for (const g of groups.slice(0, S.dupShown)) {
-      const picked = g.files.filter((f) => S.selected.has(f.path)).length;
+      const picked = g.files.filter((f) => gone(f.path)).length;
       const first = split(g.keep);
       out.push(h('section', { class: 'box group' },
         h('div', { class: 'group-head' },
@@ -582,9 +584,15 @@
           return fileRow(f, {
             // 중복에서는 "어디에 있느냐"가 판단 기준이므로 위치를 크게 보여준다
             primary: s.dir, secondary: s.name === first.name ? '같은 이름' : s.name, showThumb: false,
-            badge: f.path === g.keep && !S.selected.has(f.path) ? '원본 추정 · 남김' : null,
+            on: gone(f.path),
+            badge: f.path === g.keep && !gone(f.path) ? '원본 추정 · 남김' : null,
             onToggle: (on, el) => {
-              const others = g.files.filter((x) => x !== f && !S.selected.has(x.path)).length;
+              if (!on && !S.selected.has(f.path)) {
+                el.checked = true;
+                toast('이 파일이 들어 있는 폴더가 선택돼 있어요. 정리 추천에서 폴더 선택을 먼저 해제하세요.');
+                return;
+              }
+              const others = g.files.filter((x) => x !== f && !gone(x.path)).length;
               if (on && others === 0) {
                 el.checked = false;
                 toast('똑같은 파일 중 하나는 꼭 남겨야 해요.');

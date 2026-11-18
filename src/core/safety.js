@@ -20,7 +20,7 @@ function isInside(child, parent) {
  * @param {string} ctx.home
  * @param {string[]} ctx.roots 검사했던 폴더
  * @param {Map<string,{size:number,mtimeMs:number,isDir?:boolean}>} ctx.known 검사 결과에 있던 항목
- * @param {Array<{files:Array<{path:string}>}>} ctx.dupGroups
+ * @param {Array<{keep?:string,files:Array<{path:string}>}>} ctx.dupGroups
  * @returns {Promise<{ok:string[], rejected:Array<{path:string,reason:string}>}>}
  */
 async function validateDeletion(paths, { home, roots = [], known, dupGroups = [] }) {
@@ -50,20 +50,36 @@ async function validateDeletion(paths, { home, roots = [], known, dupGroups = []
     want.add(p);
   }
 
+  // 어떤 경로가 이번 요청으로 사라지는지: 직접 골랐거나, 고른 폴더 안에 들어 있거나.
+  // (폴더를 고르면 그 안의 파일도 함께 휴지통으로 가므로 반드시 같이 따져야 한다)
+  const coveredBy = (m) => {
+    if (want.has(m)) return m;
+    for (const w of want) if (isInside(m, w)) return w;
+    return null;
+  };
+  const exists = async (m) => { try { await fsp.access(m); return true; } catch { return false; } };
+
   // 중복 묶음의 모든 사본을 한꺼번에 지우는 일은 막는다: 살아남는 사본이 꼭 하나는 있어야 한다.
   for (const g of dupGroups) {
     const members = g.files.map((f) => f.path);
-    if (!members.some((m) => want.has(m))) continue;
-    let survivor = false;
-    for (const m of members) {
-      if (want.has(m)) continue;
-      try { await fsp.access(m); survivor = true; break; } catch { /* 이미 없음 */ }
-    }
-    if (!survivor) {
-      const keep = members.find((m) => want.has(m));
-      want.delete(keep);
-      rejected.push({ path: keep, reason: '같은 파일이 하나는 남아 있어야 해서 남겨뒀어요' });
-    }
+    if (!members.some(coveredBy)) continue;
+    const alive = [];
+    for (const m of members) if (await exists(m)) alive.push(m);
+    if (alive.some((m) => !coveredBy(m))) continue; // 요청과 무관하게 남는 사본이 있음
+    if (!alive.length) continue;
+    // 남길 사본을 고른다: 파일 하나만 빼면 되는 쪽을 먼저, 그다음 원본으로 추정된 파일
+    const direct = alive.filter((m) => want.has(m));
+    const pick = direct.find((m) => m === g.keep) || direct[0] || (alive.includes(g.keep) ? g.keep : alive[0]);
+    const cover = coveredBy(pick);
+    want.delete(cover);
+    rejected.push({
+      path: cover,
+      reason: cover === pick ? '같은 파일이 하나는 남아 있어야 해서 남겨뒀어요' : '마지막으로 남은 사본이 이 폴더 안에 있어서 폴더를 남겨뒀어요',
+    });
+  }
+  // 고른 폴더 안에 있는 항목을 따로 또 고른 경우, 폴더 하나로 합친다
+  for (const p of [...want]) {
+    for (const w of want) if (isInside(p, w)) { want.delete(p); break; }
   }
   for (const p of want) ok.push(p);
   return { ok, rejected };

@@ -89,6 +89,40 @@ test('안전 검사: 중복 묶음의 모든 사본을 지우려 하면 하나�
   assert.strictEqual(r2.rejected.length, 0);
 });
 
+test('안전 검사: 폴더와 그 안 파일의 중복본을 함께 골라도 사본 하나는 남는다', async () => {
+  const fs2 = require('fs');
+  const dir = path.join(home, 'Downloads/old-folder');
+  const inside = path.join(dir, 'inner/keep-me.bin');
+  const outside = path.join(home, 'Documents/keep-me copy.bin');
+  const other = path.join(home, 'Downloads/old-folder-2');
+  const inside2 = path.join(other, 'keep-me.bin');
+  const data = Buffer.alloc(2 * MB, 7);
+  for (const f of [inside, outside, inside2]) { fs2.mkdirSync(path.dirname(f), { recursive: true }); fs2.writeFileSync(f, data); }
+  const st = (f) => { const x = fs2.lstatSync(f); return { size: x.size, mtimeMs: x.mtimeMs }; };
+  const known = new Map([[dir, { size: 2 * MB, mtimeMs: 0, isDir: true }], [other, { size: 2 * MB, mtimeMs: 0, isDir: true }],
+    [inside, st(inside)], [outside, st(outside)], [inside2, st(inside2)]]);
+  const group = { keep: inside, files: [{ path: inside }, { path: outside }, { path: inside2 }] };
+  const c = { home, roots: [home], known, dupGroups: [group] };
+
+  // 폴더(안에 사본 A) + 바깥 사본 B + 폴더2(안에 사본 C)를 모두 고른 경우
+  const r = await validateDeletion([dir, outside, other], c);
+  const gone = (f) => r.ok.some((d) => f === d || f.startsWith(d + path.sep));
+  assert.strictEqual([inside, outside, inside2].filter((f) => !gone(f)).length, 1, '정확히 하나가 남아야 함');
+  assert.strictEqual(r.rejected.length, 1);
+
+  // 사본이 모두 폴더 안에만 있고 그 폴더들을 전부 고른 경우에도 하나는 남는다
+  fs2.rmSync(outside);
+  const r2 = await validateDeletion([dir, other], { ...c, dupGroups: [{ keep: inside, files: [{ path: inside }, { path: inside2 }] }] });
+  assert.strictEqual(r2.ok.length, 1);
+  assert.match(r2.rejected[0].reason, /남/);
+
+  // 폴더 안의 파일을 따로 또 고르면 겹치는 요청은 하나로 합친다
+  fs2.writeFileSync(outside, data);
+  const r3 = await validateDeletion([dir, inside], { ...c, dupGroups: [] });
+  assert.deepStrictEqual(r3.ok, [dir]);
+  fs2.rmSync(dir, { recursive: true }); fs2.rmSync(other, { recursive: true }); fs2.rmSync(outside);
+});
+
 test('안전 검사: 검사 뒤에 바뀐 파일은 지우지 않는다', async () => {
   const c = ctx();
   const p = path.join(home, 'Downloads/Installer.dmg');
