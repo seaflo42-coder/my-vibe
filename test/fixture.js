@@ -1,0 +1,59 @@
+'use strict';
+// 테스트용 가짜 홈 폴더를 만든다 (중복 파일, 캐시, 설치 파일 등 포함).
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+
+const MB = 1000 * 1000;
+const DAY = 86400000;
+
+function write(p, data) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, data);
+}
+function age(p, days) {
+  const t = new Date(Date.now() - days * DAY);
+  fs.utimesSync(p, t, t);
+}
+
+function makeHome() {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'malkkeum-')));
+  const a = crypto.randomBytes(2 * MB);
+  const b = crypto.randomBytes(2 * MB);
+  // 같은 크기지만 끝부분만 다른 파일 (지문 비교가 정확한지 확인용)
+  const a2 = Buffer.from(a); a2[a2.length - 1] ^= 0xff;
+  // 가운데만 다른 파일: 일부분 지문은 같을 수 있어도 전체 지문에서 걸러져야 함
+  const a3 = Buffer.from(a); a3[700 * 1000] ^= 0xff;
+  write(path.join(home, 'Documents/report.bin'), a);
+  write(path.join(home, 'Desktop/report copy.bin'), a);
+  write(path.join(home, 'Documents/sub/report (2).bin'), a);
+  write(path.join(home, 'Documents/almost.bin'), a2);
+  write(path.join(home, 'Documents/almost-mid.bin'), a3);
+  write(path.join(home, 'Pictures/photo.bin'), b);
+  write(path.join(home, 'Movies/photo-dup.bin'), b);
+  write(path.join(home, 'Documents/small1.txt'), 'same');
+  write(path.join(home, 'Documents/small2.txt'), 'same');
+  // 건드리면 안 되는 곳들
+  write(path.join(home, 'Applications/Foo.app/Contents/x.bin'), a);
+  write(path.join(home, 'Pictures/Photos Library.photoslibrary/originals/p.bin'), b);
+  write(path.join(home, '.hidden/secret.bin'), a);
+  write(path.join(home, 'Documents/proj/node_modules/x.bin'), a);
+  fs.symlinkSync(path.join(home, 'Documents/report.bin'), path.join(home, 'Desktop/link.bin'));
+  fs.linkSync(path.join(home, 'Pictures/photo.bin'), path.join(home, 'Pictures/photo-hardlink.bin'));
+  // 추천 대상
+  write(path.join(home, 'Downloads/Installer.dmg'), crypto.randomBytes(3 * MB));
+  write(path.join(home, 'Downloads/old-thing.zip'), crypto.randomBytes(2 * MB));
+  age(path.join(home, 'Downloads/old-thing.zip'), 400);
+  write(path.join(home, 'Downloads/new-thing.zip'), crypto.randomBytes(2 * MB));
+  write(path.join(home, 'Library/Caches/com.example.app/data'), crypto.randomBytes(2 * MB));
+  write(path.join(home, 'Library/Caches/com.apple.Safari/data'), crypto.randomBytes(2 * MB));
+  write(path.join(home, 'Library/Logs/app.log'), crypto.randomBytes(2 * MB));
+  write(path.join(home, 'Library/Preferences/keep.plist'), a);
+  write(path.join(home, '.Trash/junk.bin'), crypto.randomBytes(1 * MB));
+  write(path.join(home, 'Movies/big.mov'), crypto.randomBytes(101 * MB));
+  return home;
+}
+
+
+module.exports = { makeHome, MB };

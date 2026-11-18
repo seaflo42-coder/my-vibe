@@ -1,35 +1,54 @@
 {
-  "name": "my-vibe",
+  "name": "malkkeum",
+  "productName": "Malkkeum",
+  "version": "0.1.0",
+  "description": "말끔 — 맥 저장공간 정리 도구 (중복 파일 찾기, 정리 추천, 안전한 삭제)",
+  "main": "src/main/main.js",
+  "author": "seaflo42-coder",
+  "license": "MIT",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "lint": "eslint .",
-    "preview": "vite preview",
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^5.2.1",
-    "framer-motion": "^12.31.0",
-    "qrcode.react": "^4.2.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "ws": "^8.19.0"
+    "start": "electron .",
+    "test": "node --test test/core.test.js",
+    "test:ui": "node test/ui-check.js",
+    "dist": "electron-builder --mac dmg --arm64 --x64 --publish never"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@types/react": "^19.2.5",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
-    "vite": "npm:rolldown-vite@7.2.5"
+    "electron": "^45.3.4",
+    "electron-builder": "^26.18.0",
+    "playwright-core": "^1.65.1"
   },
-  "overrides": {
-    "vite": "npm:rolldown-vite@7.2.5"
+  "build": {
+    "appId": "com.seaflo42.malkkeum",
+    "productName": "Malkkeum",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "Malkkeum-${version}-${arch}.${ext}",
+      "extendInfo": {
+        "CFBundleDisplayName": "말끔",
+        "NSDesktopFolderUsageDescription": "바탕화면의 중복 파일과 정리할 파일을 찾기 위해 필요해요.",
+        "NSDocumentsFolderUsageDescription": "문서 폴더의 중복 파일과 정리할 파일을 찾기 위해 필요해요.",
+        "NSDownloadsFolderUsageDescription": "다운로드 폴더의 중복 파일과 정리할 파일을 찾기 위해 필요해요.",
+        "NSAppleEventsUsageDescription": "휴지통을 비우기 위해 Finder에 요청해요."
+      }
+    },
+    "dmg": {
+      "title": "Malkkeum ${version}"
+    }
   }
 }

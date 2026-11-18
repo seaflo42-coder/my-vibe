@@ -1,16 +1,82 @@
-# React + Vite
+# 말끔 — 맥 저장공간 정리 도구
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+맥에 공간이 부족할 때, **똑같은 파일(중복 파일)** 과 **지워도 되는 파일**을 찾아서 안전하게 정리해 주는 앱입니다.
 
-Currently, two official plugins are available:
+- **중복 파일 찾기** — 이름이 달라도 내용이 완전히 같은 파일을 묶어서 보여줍니다.
+- **정리 추천** — 휴지통, 설치 파일(.dmg/.pkg), 앱 임시 파일(캐시), 기록 파일(로그), 오래된 다운로드, 아이폰 백업, 100MB 넘는 큰 파일.
+- **안전한 삭제** — 바로 지우지 않고 **휴지통으로 옮깁니다.** 잘못 골랐으면 휴지통에서 다시 꺼내면 됩니다.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 설치하기
 
-## React Compiler
+1. [내려받기 페이지(Releases)](https://github.com/seaflo42-coder/my-vibe/releases)에서 내 맥에 맞는 파일을 받습니다.
+   - 화면 왼쪽 위  → **이 Mac에 관하여** 에서 "칩"이 **Apple M1/M2/M3…** 이면 → `Malkkeum-…-arm64.dmg`
+   - "프로세서"가 **Intel** 이면 → `Malkkeum-…-x64.dmg`
+2. 받은 파일을 열고, **Malkkeum** 아이콘을 **Applications(응용 프로그램)** 폴더로 끌어다 놓습니다.
+3. **처음 열 때 한 번만** 아래 과정을 거쳐야 합니다. (애플에 유료 개발자 등록을 하지 않은 앱이라 맥이 한 번 막습니다.)
+   1. 응용 프로그램에서 Malkkeum을 엽니다 → "열 수 없습니다" 경고가 뜨면 **완료**를 누릅니다.
+   2. ** → 시스템 설정 → 개인정보 보호 및 보안** 으로 가서 아래쪽의 **"그래도 열기"** 를 누릅니다.
+   3. 다시 한 번 **열기**를 누르면 그다음부터는 그냥 열립니다.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+   > "손상되었기 때문에 열 수 없습니다"라고 나오면: **터미널** 앱을 열고 아래 한 줄을 붙여 넣은 뒤 엔터를 누르세요.
+   > `xattr -cr /Applications/Malkkeum.app`
 
-## Expanding the ESLint configuration
+## 사용법
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. **검사 시작**을 누릅니다. 검사만으로는 아무것도 지워지지 않습니다.
+   - 처음에는 "문서/다운로드/바탕화면 폴더에 접근하도록 허용하겠습니까?" 창이 뜹니다. **허용**을 눌러주세요.
+2. **중복 파일** 메뉴에서 "가장 오래된 것만 남기기"를 누르면 사본들이 자동으로 선택됩니다. 하나하나 직접 골라도 됩니다.
+3. **정리 추천** 메뉴에서 지울 항목을 고릅니다. 초록색 "지워도 안전" 표시부터 정리하는 걸 권합니다.
+4. 아래쪽 **휴지통으로 이동**을 누릅니다.
+5. 마지막으로 **휴지통 비우기**를 해야 실제로 공간이 늘어납니다.
+
+## 안전 장치
+
+- 시스템 파일, 앱(.app), 사진 보관함, 숨김 폴더, `~/Library`의 설정 파일은 **검사하지도 지우지도 않습니다.**
+- 중복 묶음에서 **마지막 한 개는 지울 수 없습니다.** (화면에서도 막고, 실행 직전에도 한 번 더 막습니다.)
+- 검사 결과에 나온 항목만 지울 수 있고, 검사 뒤에 내용이 바뀐 파일은 건너뜁니다.
+- iCloud에만 있고 맥에 내려받지 않은 파일은 건드리지 않습니다. (어차피 공간을 차지하지 않습니다.)
+- 삭제는 항상 휴지통으로 이동입니다. 완전 삭제는 "휴지통 비우기"를 직접 눌렀을 때만 일어납니다.
+
+## 미리 알아둘 한계
+
+- **표시되는 절약 용량은 최대치입니다.** Finder에서 "복제"로 만든 사본은 맥이 내부적으로 공간을 공유하기 때문에, 지워도 표시된 만큼 늘지 않을 수 있습니다.
+- 앱 자체 크기가 약 250MB입니다. (화면을 그리는 엔진을 통째로 포함하는 방식이라 그렇습니다.)
+- 사진 앱 안의 중복 사진은 찾지 않습니다. 사진 앱의 "중복된 항목" 기능을 쓰세요.
+- 더 많은 폴더를 검사하려면 ** → 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한**에서 Malkkeum을 켜면 됩니다.
+
+## 고치고 싶을 때 (개발 안내)
+
+| 위치 | 하는 일 |
+|---|---|
+| `src/core/` | 검사 엔진 — 폴더 훑기(`walk.js`), 중복 찾기(`duplicates.js`), 추천(`recommend.js`), 삭제 전 안전 검사(`safety.js`) |
+| `src/main/` | 앱 본체 — 창 띄우기, 휴지통으로 옮기기 |
+| `src/renderer/` | 화면 — `index.html`, `styles.css`(색·모양), `app.js`(동작·문구) |
+| `test/` | 자동 테스트 |
+| `.github/workflows/build.yml` | 코드를 올리면 GitHub가 맥 앱(.dmg)을 자동으로 만들어 내려받기 페이지에 올립니다 |
+
+```bash
+npm install      # 준비 (처음 한 번)
+npm start        # 앱 실행
+npm test         # 검사 엔진 테스트
+npm run test:ui  # 실제 앱을 띄워 전체 흐름 확인 (가짜 폴더 사용, 실제 파일은 안 건드림)
+npm run dist     # 맥에서 .dmg 만들기
+```
+
+새 버전을 낼 때는 `package.json`의 `version` 숫자를 올리고 코드를 올리면 됩니다.
+
+## 구글 스티치(Stitch) 연결
+
+화면 디자인을 스티치로 다듬을 수 있게 준비해 두었습니다.
+
+- 스티치 스킬 11개가 `.claude/skills/`에 설치되어 있습니다. (출처: [google-labs-code/stitch-skills](https://github.com/google-labs-code/stitch-skills), Apache-2.0)
+- 스티치 MCP 연결 설정이 `.mcp.json`에 들어 있습니다. **API 키만 넣으면 연결됩니다.**
+  1. [stitch.withgoogle.com](https://stitch.withgoogle.com) 로그인 → 프로필 → **Stitch settings → API key → Create key**
+  2. 그 키를 `STITCH_API_KEY`라는 이름의 환경 변수로 등록합니다.
+
+## 다음 버전(V2) 아이디어
+
+- 비슷한 사진 찾기 (완전히 같지 않아도 거의 같은 사진)
+- 폴더별 용량 지도 (어디가 공간을 많이 쓰는지 한눈에)
+- 정식 애플 서명 (처음 열 때 경고 없이 설치) — 애플 개발자 등록(연 $99) 필요
+- 훨씬 가벼운 네이티브 버전 (약 10MB)
+- 앱 삭제 시 남은 찌꺼기 파일 정리

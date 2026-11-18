@@ -1,0 +1,55 @@
+name: 맥 앱 만들기
+
+on:
+  push:
+    branches: [main, master, 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 검사 엔진 테스트
+        run: npm test
+      - name: 실제 맥에서 전체 흐름 확인 (검사 → 선택 → 휴지통)
+        run: npm run test:ui
+      - name: 앱 만들기 (Apple Silicon + Intel)
+        run: npm run dist
+      - name: 만들어진 앱 서명 확인
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/mac-arm64/Malkkeum.app
+          codesign --verify --deep --strict --verbose=2 dist/mac/Malkkeum.app
+          ls -lh dist/*.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Malkkeum-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+      - name: 내려받기 페이지(릴리스)에 올리기
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.dmg --clobber
+          else
+            gh release create "$TAG" dist/*.dmg --target "$GITHUB_SHA" --title "말끔 $VERSION" \
+              --notes "맥 저장공간 정리 도구 '말끔'. Apple Silicon(M1 이후) 맥은 arm64, 인텔 맥은 x64 파일을 받으세요. 설치 방법은 README를 참고하세요."
+          fi
