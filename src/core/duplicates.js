@@ -122,4 +122,21 @@ async function findDuplicates(files, { minSize = 1, onProgress, isCancelled } = 
   return groups;
 }
 
-module.exports = { findDuplicates, quickHash, fullHash };
+// 묶음 안에서 "원본일 가능성이 가장 높은 파일"을 고른다. 나머지를 지우도록 추천하기 위함.
+//  - 이름에 사본 표시(복사본, copy, (2) …)가 있으면 사본일 가능성이 높다
+//  - 다운로드 폴더에 있는 쪽은 다시 받을 수 있으니 사본으로 본다
+//  - 그래도 같으면 가장 오래된 파일, 그다음 경로가 짧은 파일을 원본으로 본다
+const COPY_MARK = /(복사본|사본|\bcopy\b|\(\d+\)$|[ _-]\d{1,2}$| 2$)/i;
+function copyScore(p) {
+  const base = p.slice(p.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '');
+  let score = 0;
+  if (COPY_MARK.test(base)) score += 2;
+  if (/\/Downloads\//.test(p)) score += 1;
+  return score;
+}
+function pickOriginal(files) {
+  return [...files].sort((a, b) =>
+    copyScore(a.path) - copyScore(b.path) || a.mtimeMs - b.mtimeMs || a.path.length - b.path.length)[0];
+}
+
+module.exports = { findDuplicates, quickHash, fullHash, pickOriginal };

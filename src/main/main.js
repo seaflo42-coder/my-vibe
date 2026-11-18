@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, systemPreferences, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, systemPreferences, Menu, nativeImage } = require('electron');
 const path = require('path');
 const os = require('os');
 const fsp = require('fs/promises');
@@ -140,6 +140,30 @@ ipcMain.handle('files:reveal', (_e, p) => {
   return true;
 });
 
+// 파일의 실제 모습: 사진·문서는 미리보기 그림, 그 밖에는 맥이 쓰는 파일 아이콘
+ipcMain.handle('files:thumb', async (_e, p) => {
+  if (typeof p !== 'string' || !lastScan.known.has(p)) return null;
+  if (IS_MAC) {
+    try {
+      const img = await nativeImage.createThumbnailFromPath(p, { width: 72, height: 72 });
+      if (!img.isEmpty()) return img.toDataURL();
+    } catch { /* 미리보기를 만들 수 없는 종류 → 아이콘으로 */ }
+  }
+  try {
+    const img = await app.getFileIcon(p, { size: 'normal' });
+    return img.isEmpty() ? null : img.toDataURL();
+  } catch {
+    return null;
+  }
+});
+
+// 맥의 훑어보기(Quick Look)로 내용을 확인
+ipcMain.handle('files:preview', (_e, p) => {
+  if (typeof p !== 'string' || !lastScan.known.has(p) || !win) return false;
+  if (IS_MAC) { win.previewFile(p); return true; }
+  return false;
+});
+
 ipcMain.handle('trash:open', async () => {
   await shell.openPath(path.join(HOME, '.Trash'));
   return true;
@@ -181,6 +205,7 @@ function buildMenu() {
       label: '파일',
       submenu: [
         { label: '검사 시작', accelerator: 'CmdOrCtrl+R', click: () => send('menu:scan') },
+        { label: '선택한 항목을 휴지통으로 이동', accelerator: 'CmdOrCtrl+Backspace', click: () => send('menu:trash') },
         { type: 'separator' },
         { role: 'close', label: '윈도우 닫기' },
       ],

@@ -1,10 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2cc09c"/><stop offset="1" stop-color="#0b7f64"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6b68f0"/><stop offset=".55" stop-color="#3a7bd5"/><stop offset="1" stop-color="#2bb3c9"/>
     </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".42"/><stop offset="1" stop-color="#fff" stop-opacity=".14"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".5" stop-color="#fff" stop-opacity=".15"/><stop offset="1" stop-color="#fff" stop-opacity=".35"/>
+    </linearGradient>
+    <radialGradient id="glow" cx=".3" cy=".2" r=".9">
+      <stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".6" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="sq"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
   </defs>
-  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#g)"/>
-  <circle cx="512" cy="512" r="250" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="56"/>
-  <path d="M372 520l100 100 190-212" fill="none" stroke="#fff" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <g clip-path="url(#sq)">
+    <circle cx="250" cy="820" r="330" fill="#bf5af2" opacity=".35"/>
+    <rect x="100" y="100" width="824" height="824" fill="url(#glow)"/>
+  </g>
+  <circle cx="512" cy="512" r="262" fill="url(#glass)"/>
+  <circle cx="512" cy="512" r="262" fill="none" stroke="url(#edge)" stroke-width="8"/>
+  <path d="M392 520l84 84 160-180" fill="none" stroke="#fff" stroke-width="64" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="104" y="104" width="816" height="816" rx="182" fill="none" stroke="url(#edge)" stroke-width="8" opacity=".6"/>
 </svg>

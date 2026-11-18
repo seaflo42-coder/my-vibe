@@ -30,6 +30,17 @@ test('내용이 완전히 같은 파일만 중복으로 묶는다', () => {
   assert.strictEqual(result.summary.dupWasted, 2 * MB * 2 + 2 * MB);
 });
 
+test('원본 추정: 사본 표시가 없는 파일을 남길 파일로 고른다', () => {
+  const { pickOriginal } = require('../src/core/duplicates');
+  const g = result.groups.find((x) => x.files.length === 3);
+  assert.strictEqual(rel(g.keep), 'Documents/report.bin');
+  const pick = (names) => pickOriginal(names.map((n, i) => ({ path: n, mtimeMs: i }))).path;
+  assert.strictEqual(pick(['/u/Downloads/a.pdf', '/u/Documents/a.pdf']), '/u/Documents/a.pdf');
+  assert.strictEqual(pick(['/u/Documents/보고서 복사본.hwp', '/u/Documents/보고서.hwp']), '/u/Documents/보고서.hwp');
+  assert.strictEqual(pick(['/u/Pictures/IMG_0012.jpg', '/u/Pictures/IMG_0012 2.jpg']), '/u/Pictures/IMG_0012.jpg');
+  assert.strictEqual(pick(['/u/a/x.mov', '/u/b/x.mov']), '/u/a/x.mov'); // 구분이 안 되면 더 오래된 쪽
+});
+
 test('앱·사진 보관함·숨김·Library·링크 안쪽은 중복 후보에 넣지 않는다', () => {
   const all = result.groups.flatMap((x) => x.files.map((f) => rel(f.path)));
   for (const bad of ['Foo.app', 'photoslibrary', '.hidden', 'node_modules', 'Desktop/link.bin', 'Library', 'almost', 'small']) {

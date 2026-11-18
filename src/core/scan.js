@@ -2,7 +2,7 @@
 // 검사 한 번의 전체 흐름: 폴더 훑기 → 중복 찾기 → 정리 추천.
 const path = require('path');
 const { walk } = require('./walk');
-const { findDuplicates } = require('./duplicates');
+const { findDuplicates, pickOriginal } = require('./duplicates');
 const { buildRecommendations } = require('./recommend');
 
 const KEEP_MIN = 100 * 1000; // 이보다 작은 파일은 정리 효과가 거의 없어 기억하지 않음
@@ -37,7 +37,7 @@ async function runScan({ home, roots, minDupSize = 1000 * 1000, useBirthtime = t
   if (isCancelled()) return null;
 
   const slim = (f) => ({ path: f.path, size: f.size, mtimeMs: f.mtimeMs });
-  const groups = allGroups.slice(0, MAX_GROUPS).map((g) => ({ ...g, files: g.files.map(slim) }));
+  const groups = allGroups.slice(0, MAX_GROUPS).map((g) => ({ ...g, keep: pickOriginal(g.files).path, files: g.files.map(slim) }));
   return {
     roots: scanRoots,
     groups,
