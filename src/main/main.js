@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme, systemPreferences, Menu } = require('electron');
 const path = require('path');
 const os = require('os');
 const fsp = require('fs/promises');
@@ -13,6 +13,17 @@ let worker = null;
 let lastScan = { roots: [], known: new Map(), dupGroups: [] };
 
 const HOME = os.homedir();
+const IS_MAC = process.platform === 'darwin';
+
+// 사용자가 시스템 설정에서 고른 강조색 (예: 파랑, 보라, 초록 …)
+function accentHex() {
+  try {
+    const c = systemPreferences.getAccentColor();
+    return c ? '#' + c.slice(0, 6) : null;
+  } catch {
+    return null;
+  }
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -21,8 +32,10 @@ function createWindow() {
     minWidth: 860,
     minHeight: 600,
     title: '말끔',
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#17181b' : '#f6f5f2',
+    // 맥에서는 제목 막대를 숨기고 신호등 버튼만 남기며, 사이드바 뒤로 바탕이 비치는 반투명 재질을 쓴다
+    ...(IS_MAC
+      ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 19, y: 18 }, vibrancy: 'sidebar', visualEffectState: 'followWindow', backgroundColor: '#00000000' }
+      : { backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ffffff' }),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -140,6 +153,8 @@ ipcMain.handle('trash:empty', () => new Promise((resolve) => {
   });
 }));
 
+ipcMain.handle('app:accent', () => (IS_MAC ? accentHex() : null));
+
 ipcMain.handle('app:openPrivacySettings', async () => {
   if (process.platform === 'darwin') {
     await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
@@ -147,8 +162,52 @@ ipcMain.handle('app:openPrivacySettings', async () => {
   return true;
 });
 
+// 화면 맨 위 메뉴 막대 (한국어)
+function buildMenu() {
+  const template = [
+    ...(IS_MAC ? [{
+      label: '말끔',
+      submenu: [
+        { role: 'about', label: '말끔에 관하여' },
+        { type: 'separator' },
+        { role: 'hide', label: '말끔 가리기' },
+        { role: 'hideOthers', label: '기타 가리기' },
+        { role: 'unhide', label: '모두 보기' },
+        { type: 'separator' },
+        { role: 'quit', label: '말끔 종료' },
+      ],
+    }] : []),
+    {
+      label: '파일',
+      submenu: [
+        { label: '검사 시작', accelerator: 'CmdOrCtrl+R', click: () => send('menu:scan') },
+        { type: 'separator' },
+        { role: 'close', label: '윈도우 닫기' },
+      ],
+    },
+    {
+      label: '편집',
+      submenu: [
+        { role: 'copy', label: '복사하기' },
+        { role: 'selectAll', label: '전체 선택' },
+      ],
+    },
+    {
+      label: '윈도우',
+      submenu: [
+        { role: 'minimize', label: '최소화' },
+        { role: 'zoom', label: '확대/축소' },
+        { role: 'togglefullscreen', label: '전체 화면' },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 app.whenReady().then(() => {
+  buildMenu();
   createWindow();
+  if (IS_MAC) systemPreferences.on('accent-color-changed', () => send('app:accent-changed', accentHex()));
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 app.on('window-all-closed', () => { stopWorker(); app.quit(); });

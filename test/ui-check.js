@@ -45,10 +45,12 @@ const { makeHome } = require('./fixture');
     await page.click('.nav-item:has-text("정리 추천")');
     await page.click('.cat-head:has-text("앱 임시 파일")');
     await page.locator('.cat:has-text("앱 임시 파일") .cat-tools input').check();
+    await page.waitForTimeout(4600); // 안내 알림이 사라진 뒤 촬영
     await shot('4-reco');
 
     // 휴지통으로 이동
     await page.click('#trashBtn');
+    await page.waitForTimeout(400);
     await shot('5-confirm');
     await page.click('.modal .btn.primary');
     await page.waitForSelector('.toast:has-text("휴지통으로 옮겼어요")', { timeout: 30000 });

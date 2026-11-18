@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>말끔</title>
 <link rel="stylesheet" href="styles.css">
@@ -10,13 +10,10 @@
 <body>
 <aside class="sidebar">
   <div class="drag"></div>
-  <div class="brand">
-    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M9 16.5l4.6 4.6L23 11.5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <div><div class="brand-name">말끔</div><div class="brand-sub">맥 저장공간 정리</div></div>
-  </div>
   <nav id="nav" aria-label="메뉴"></nav>
   <div class="side-disk" id="sideDisk"></div>
 </aside>
+<header id="toolbar" class="toolbar"></header>
 <main id="main" tabindex="-1"></main>
 <footer id="actionbar" class="actionbar" hidden></footer>
 <div id="modalRoot"></div>

@@ -9,6 +9,10 @@ const on = (channel) => (cb) => {
 };
 
 contextBridge.exposeInMainWorld('api', {
+  platform: process.platform,
+  accent: () => ipcRenderer.invoke('app:accent'),
+  onAccent: on('app:accent-changed'),
+  onMenuScan: on('menu:scan'),
   diskInfo: () => ipcRenderer.invoke('disk:info'),
   pickFolders: () => ipcRenderer.invoke('dialog:pickFolders'),
   startScan: (opts) => ipcRenderer.invoke('scan:start', opts),
