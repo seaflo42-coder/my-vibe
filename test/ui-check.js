@@ -52,10 +52,12 @@ const { makeHome } = require('./fixture');
 
     // 기준 줄: 이름을 누르면 이름순, 다시 누르면 반대로
     const titles = () => page.locator('.group .title').allInnerTexts();
+    // (묶음 이름은 남길 파일에 따라 컴퓨터마다 다를 수 있어, 정해진 이름 대신 순서만 확인한다)
     await page.click('.headbar .sh.file');
-    assert.deepStrictEqual(await titles(), ['photo-dup.bin', 'report.bin']);
+    const asc = await titles();
+    assert.deepStrictEqual(asc, [...asc].sort((x, y) => x.localeCompare(y, 'ko')));
     await page.click('.headbar .sh.file');
-    assert.deepStrictEqual(await titles(), ['report.bin', 'photo-dup.bin']);
+    assert.deepStrictEqual(await titles(), [...asc].reverse());
     await page.click('.headbar .sh.size');
 
     // 검색: 이름이나 폴더로 좁혀 본다
