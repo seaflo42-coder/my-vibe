@@ -12,8 +12,9 @@ const { makeHome } = require('./fixture');
   const shots = process.argv[2];
   const home = makeHome();
   const app = await electron.launch({
-    executablePath: require('electron'),
-    args: [path.join(__dirname, '..'), '--no-sandbox'],
+    // MALKKEUM_BIN을 주면 설치 파일과 같은 방식으로 포장된 앱을 띄워 확인한다
+    executablePath: process.env.MALKKEUM_BIN || require('electron'),
+    args: process.env.MALKKEUM_BIN ? ['--no-sandbox'] : [path.join(__dirname, '..'), '--no-sandbox'],
     env: { ...process.env, HOME: home, XDG_DATA_HOME: path.join(home, '.local/share') },
   });
   const errors = [];

@@ -36,6 +36,9 @@ jobs:
           codesign --verify --deep --strict --verbose=2 dist/mac-arm64/Malkkeum.app
           codesign --verify --deep --strict --verbose=2 dist/mac/Malkkeum.app
           ls -lh dist/*.dmg
+      - name: 만들어진 앱을 실제로 띄워 전체 흐름 확인
+        # 포장하기 전에는 되던 것이 설치 파일로 만든 뒤 안 되는 일을 잡는다
+        run: MALKKEUM_BIN="$PWD/dist/mac-arm64/Malkkeum.app/Contents/MacOS/Malkkeum" npm run test:ui
       - uses: actions/upload-artifact@v4
         with:
           name: Malkkeum-dmg
