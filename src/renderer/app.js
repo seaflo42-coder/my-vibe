@@ -1154,19 +1154,32 @@
 
   // ---------- 앱: 안 쓰는 앱 · 지운 앱이 남긴 파일 ----------
   const A = { apps: null, left: null, filter: 'unused', sort: 'old', picked: new Set(), loading: false, busy: false };
+  let appsRun = 0; // '다시 확인'을 누르면 앞서 돌던 확인은 버린다
   async function loadApps(force) {
     if (A.loading || (A.apps && !force)) return;
     A.loading = true;
+    const runId = ++appsRun;
     if (force) { A.apps = null; A.left = null; A.picked.clear(); renderMain(); }
     try {
-      A.apps = await api.appsList();
-      if (S.view === 'apps') renderMain();
-      // 크기 재기와 찌꺼기 찾기는 시간이 걸리므로 목록을 먼저 보여주고 뒤이어 채운다
-      const [sizes, left] = await Promise.all([api.appsSizes().catch(() => ({})), api.appsLeftovers().catch(() => [])]);
-      for (const a of A.apps) if (sizes[a.path]) Object.assign(a, sizes[a.path]);
-      A.left = left;
-    } catch { A.apps = A.apps || []; A.left = A.left || []; } finally { A.loading = false; }
+      // 1) 목록을 먼저 보여준다
+      A.apps = (await api.appsList()).map((a) => ({ ...a, pending: true }));
+    } catch { A.apps = []; }
+    A.loading = false;
     if (S.view === 'apps') renderMain();
+    // 2) 지운 앱이 남긴 파일은 따로 찾는다
+    api.appsLeftovers().catch(() => []).then((left) => { if (runId === appsRun) { A.left = left; if (S.view === 'apps') renderMain(); } });
+    // 3) 앱마다 마지막 사용일과 용량을 차례로 채운다 (앱이 많으면 시간이 걸린다)
+    const queue = [...A.apps];
+    let timer = null;
+    const refresh = () => { if (!timer) timer = setTimeout(() => { timer = null; if (S.view === 'apps' && !document.querySelector('.overlay')) renderMain(); }, 400); };
+    await Promise.all([0, 1, 2].map(async () => {
+      while (queue.length && runId === appsRun) {
+        const a = queue.shift();
+        const d = await api.appsDetail(a.path).catch(() => null);
+        Object.assign(a, d || {}, { pending: false });
+        refresh();
+      }
+    }));
   }
   function agoText(ms) {
     if (ms == null) return '사용 기록 없음';
@@ -1241,9 +1254,11 @@
       return out;
     }
     const unusedCount = A.apps.filter((a) => a.unused).length;
-    const list = (A.filter === 'unused' ? A.apps.filter((a) => a.unused) : [...A.apps])
+    const checking = A.apps.filter((a) => a.pending).length;
+    // 아직 확인 중인 앱은 '안 쓰는 앱' 목록에도 일단 보여준다 (확인되면 쓰는 앱은 빠진다)
+    const list = (A.filter === 'unused' ? A.apps.filter((a) => a.unused || a.pending) : [...A.apps])
       .sort(A.sort === 'size' ? (x, y) => (y.size || 0) - (x.size || 0) : (x, y) => (x.lastUsed || 0) - (y.lastUsed || 0));
-    out.push(h('div', { class: 'caption' }, '설치된 앱'));
+    out.push(h('div', { class: 'caption' }, '설치된 앱', checking ? h('span', { class: 'side num' }, `사용 기록과 용량 확인 중 · ${nf.format(checking)}개 남음`) : null));
     const box = h('div', { class: 'box applist' },
       h('div', { class: 'cat-tools' },
         h('div', { class: 'seg' }, [['unused', `안 쓰는 앱 ${nf.format(unusedCount)}`], ['all', `전체 ${nf.format(A.apps.length)}`]].map(([v, l]) =>
@@ -1260,7 +1275,7 @@
       box.append(h('div', { class: 'cell tiled', ondblclick: () => api.reveal(a.path) },
         thumb(a.path, true, 'appicon', 128),
         h('div', { class: 'text' },
-          h('div', { class: 't' }, a.name, a.unused && h('span', { class: 'tag review' }, a.lastUsed == null ? '사용 기록 없음' : '6개월 넘게 안 씀')),
+          h('div', { class: 't' }, a.name, a.pending ? h('span', { class: 'chipq' }, '확인 중') : a.unused && h('span', { class: 'tag review' }, a.lastUsed == null ? '사용 기록 없음' : '6개월 넘게 안 씀')),
           h('div', { class: 'd' }, a.lastUsed == null ? tilde(a.path) : `${agoText(a.lastUsed)} · 마지막 ${fmtDate(a.lastUsed)}`,
             a.related.length ? ` · 관련 파일 ${a.related.length}개` : '')),
         h('span', { class: 'v num two' }, h('b', {}, a.size != null ? fmt(a.size) : '…'), a.relatedSize ? h('span', {}, `+ ${fmt(a.relatedSize)}`) : null),

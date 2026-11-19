@@ -416,32 +416,33 @@ async function sizeOf(p) {
 }
 const APP_DIRS = () => ['/Applications', path.join(HOME, 'Applications')];
 
+// 1단계: 앱 이름과 관련 파일만 빠르게 모아 목록을 먼저 보여준다
 ipcMain.handle('apps:list', async () => {
   const bundles = await apps.findAppBundles(APP_DIRS());
-  const list = await mapLimit(bundles, 8, async (p) => {
+  const list = await mapLimit(bundles, 12, async (p) => {
     const info = await readAppInfo(p);
-    let lastUsed = null;
-    if (IS_MAC) lastUsed = apps.parseMdlsDate(await run('/usr/bin/mdls', ['-name', 'kMDItemLastUsedDate', '-raw', p]));
+    // 애플 기본 앱과 말끔 자신은 목록에 넣지 않는다 (더 알아볼 필요도 없다)
+    if (!apps.canRemoveApp(p, HOME, info)) return null;
     const related = [];
     for (const c of apps.relatedCandidates(HOME, info)) { try { await fsp.lstat(c); related.push(c); } catch { /* 없음 */ } }
-    return { path: p, name: info.name, id: info.id, lastUsed, related, unused: apps.isUnused(lastUsed), removable: apps.canRemoveApp(p, HOME, info) };
+    return { path: p, name: info.name, id: info.id, related };
   });
-  // 애플 기본 앱과 말끔 자신은 목록에 넣지 않는다
-  const shown = list.filter((a) => a.removable);
+  const shown = list.filter(Boolean);
   lastApps = new Map(shown.map((a) => [a.path, a]));
   return shown;
 });
 
-ipcMain.handle('apps:sizes', async () => {
-  const out = {};
-  await mapLimit([...lastApps.values()], 4, async (a) => {
-    const size = await sizeOf(a.path);
-    let relatedSize = 0;
-    for (const r of a.related) relatedSize += await sizeOf(r);
-    a.size = size; a.relatedSize = relatedSize;
-    out[a.path] = { size, relatedSize };
-  });
-  return out;
+// 2단계: 앱 하나의 마지막 사용일과 용량. 시간이 걸릴 수 있어 화면이 앱마다 따로 요청한다
+ipcMain.handle('apps:detail', async (_e, appPath) => {
+  const a = lastApps.get(appPath);
+  if (!a) return null;
+  let lastUsed = null;
+  if (IS_MAC) lastUsed = apps.parseMdlsDate(await run('/usr/bin/mdls', ['-name', 'kMDItemLastUsedDate', '-raw', a.path], 5000));
+  const size = await sizeOf(a.path);
+  let relatedSize = 0;
+  for (const r of a.related) relatedSize += await sizeOf(r);
+  Object.assign(a, { lastUsed, size, relatedSize, unused: apps.isUnused(lastUsed) });
+  return { lastUsed, size, relatedSize, unused: a.unused };
 });
 
 ipcMain.handle('apps:leftovers', async () => {

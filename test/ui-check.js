@@ -127,8 +127,10 @@ const { makeHome } = require('./fixture');
     assert.strictEqual(await page.locator('.group').count(), 0);
     // 앱 탭: 안 쓰는 앱과, 지운 앱이 남긴 파일
     await page.click('.nav-item:has-text("앱")');
-    await page.waitForSelector('.applist .cell:has-text("Old Tool")', { timeout: 30000 });
-    await page.waitForSelector('.leftovers .row', { timeout: 30000 });
+    await page.waitForSelector('.applist .cell:has-text("Old Tool")', { timeout: 60000 });
+    await page.waitForSelector('.leftovers .row', { timeout: 60000 });
+    // 앱의 세부 정보(사용 기록·용량)가 채워질 때까지 기다린다
+    await page.waitForSelector('.applist .cell:has-text("Old Tool") .tag', { timeout: 60000 });
     assert.strictEqual(await page.locator('.leftovers .row').count(), 2, '찌꺼기는 50KB 넘는 확실한 것만');
     assert.ok(!(await page.locator('.leftovers').innerText()).includes('com.example'), '설치된 앱과 같은 곳의 파일은 건드리지 않음');
     await page.waitForTimeout(600);
@@ -171,6 +173,12 @@ const { makeHome } = require('./fixture');
     assert.strictEqual(await page.locator('.startup .cell:has-text("Example Updater")').count(), 0);
     assert.deepStrictEqual(errors, []);
     console.log('UI 확인 통과');
+  } catch (e) {
+    try {
+      const page = await app.firstWindow();
+      console.error('--- 실패 시점의 화면 글자 ---\n' + (await page.locator('body').innerText()).slice(0, 2500));
+    } catch { /* 화면을 읽지 못함 */ }
+    throw e;
   } finally {
     await app.close();
     fs.rmSync(home, { recursive: true, force: true });

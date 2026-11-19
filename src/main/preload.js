@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   openPrivacySettings: () => ipcRenderer.invoke('app:openPrivacySettings'),
   openAutomationSettings: () => ipcRenderer.invoke('app:openAutomationSettings'),
   appsList: () => ipcRenderer.invoke('apps:list'),
-  appsSizes: () => ipcRenderer.invoke('apps:sizes'),
+  appsDetail: (appPath) => ipcRenderer.invoke('apps:detail', appPath),
   appsLeftovers: () => ipcRenderer.invoke('apps:leftovers'),
   appsTrash: (appPath, withRelated) => ipcRenderer.invoke('apps:trash', appPath, withRelated),
   appsTrashLeftovers: (paths) => ipcRenderer.invoke('apps:trashLeftovers', paths),
