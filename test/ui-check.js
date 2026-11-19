@@ -129,8 +129,16 @@ const { makeHome } = require('./fixture');
     await page.click('.nav-item:has-text("앱")');
     await page.waitForSelector('.applist .cell:has-text("Old Tool")', { timeout: 60000 });
     await page.waitForSelector('.leftovers .row', { timeout: 60000 });
-    // 앱의 세부 정보(사용 기록·용량)가 채워질 때까지 기다린다
-    await page.waitForSelector('.applist .cell:has-text("Old Tool") .tag', { timeout: 60000 });
+    // 앱의 세부 정보(사용 기록·용량)가 채워질 때까지 기다린다.
+    // (맥이 어떤 사용 기록을 돌려주든 통과하도록 '전체' 목록에서 확인한다)
+    await page.click('.applist .seg button:has-text("전체")');
+    const oldTool = page.locator('.applist .cell:has-text("Old Tool")');
+    await oldTool.waitFor({ timeout: 60000 });
+    await page.waitForFunction(() => {
+      const row = [...document.querySelectorAll('.applist .cell')].find((c) => c.textContent.includes('Old Tool'));
+      return row && !row.textContent.includes('확인 중');
+    }, null, { timeout: 120000 });
+    console.log('앱 줄:', (await oldTool.innerText()).replace(/\n/g, ' | '));
     assert.strictEqual(await page.locator('.leftovers .row').count(), 2, '찌꺼기는 50KB 넘는 확실한 것만');
     assert.ok(!(await page.locator('.leftovers').innerText()).includes('com.example'), '설치된 앱과 같은 곳의 파일은 건드리지 않음');
     await page.waitForTimeout(600);
@@ -176,7 +184,7 @@ const { makeHome } = require('./fixture');
   } catch (e) {
     try {
       const page = await app.firstWindow();
-      console.error('--- 실패 시점의 화면 글자 ---\n' + (await page.locator('body').innerText()).slice(0, 2500));
+      console.error('--- 실패 시점의 화면 글자 ---\n' + (await page.locator('#main').innerText()).slice(0, 1200) + '\n…\n' + (await page.locator('#main').innerText()).slice(-1200));
     } catch { /* 화면을 읽지 못함 */ }
     throw e;
   } finally {

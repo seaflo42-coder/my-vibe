@@ -1176,7 +1176,8 @@
       while (queue.length && runId === appsRun) {
         const a = queue.shift();
         const d = await api.appsDetail(a.path).catch(() => null);
-        Object.assign(a, d || {}, { pending: false });
+        // 세부 정보를 읽지 못한 앱도 목록에서 사라지면 안 된다: '사용 기록 없음'으로 남겨 둔다
+        Object.assign(a, d || { lastUsed: null, unused: true }, { pending: false });
         refresh();
       }
     }));
