@@ -138,6 +138,27 @@ test('검사 도중 취소하면 결과 없이 끝난다', async () => {
   assert.strictEqual(r, null);
 });
 
+test('휴지통 비우기: 실패 원인을 가려내고, 휴지통 폴더만 직접 비운다', async () => {
+  const { classifyFinderError, emptyTrashDir } = require('../src/core/trash');
+  assert.strictEqual(classifyFinderError(new Error('x'), 'execution error: Not authorized to send Apple events to Finder. (-1743)'), 'automation');
+  assert.strictEqual(classifyFinderError(new Error('x'), 'execution error: User canceled. (-128)'), 'cancelled');
+  assert.strictEqual(classifyFinderError(Object.assign(new Error('x'), { killed: true }), ''), 'timeout');
+  assert.strictEqual(classifyFinderError(new Error('x'), 'something else (-50)'), 'unknown');
+
+  const fs2 = require('fs');
+  fs2.mkdirSync(path.join(home, '.Trash/folder/deep'), { recursive: true });
+  fs2.writeFileSync(path.join(home, '.Trash/folder/deep/a.bin'), 'x');
+  const before = fs2.readdirSync(path.join(home, 'Documents')).length;
+  const r = await emptyTrashDir(home);
+  assert.ok(r.ok);
+  assert.ok(r.removed >= 2);
+  assert.deepStrictEqual(fs2.readdirSync(path.join(home, '.Trash')), []);
+  assert.strictEqual(fs2.readdirSync(path.join(home, 'Documents')).length, before, '휴지통 밖은 건드리지 않음');
+  // 휴지통 폴더를 읽을 수 없으면(권한 없음) 실패로 알려준다
+  const r2 = await emptyTrashDir(path.join(home, 'no-such-home'));
+  assert.strictEqual(r2.ok, false);
+});
+
 test('폴더 크기 계산', async () => {
   const { size } = await dirSize(path.join(home, 'Library/Caches/com.example.app'));
   assert.strictEqual(size, 2 * MB);

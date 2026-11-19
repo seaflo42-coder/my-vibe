@@ -14,7 +14,18 @@
   <div class="side-disk" id="sideDisk"></div>
 </aside>
 <div class="window glass">
-  <header id="toolbar" class="toolbar"></header>
+  <header class="toolbar">
+    <div id="toolbar" class="tb-left"></div>
+    <!-- 보기 방식과 검색: 글자를 입력하는 동안 다시 그려지지 않도록 고정된 자리에 둔다 -->
+    <div id="tbTools" class="tb-tools" hidden>
+      <div id="viewSeg" class="seg icons" role="group" aria-label="보기 방식"></div>
+      <div id="searchBox" class="search">
+        <button id="searchBtn" class="ibtn" title="검색 (⌘F)" aria-label="검색"></button>
+        <input id="searchInput" type="text" placeholder="이름이나 폴더로 검색" aria-label="검색어" spellcheck="false" autocomplete="off">
+        <button id="searchClear" class="ibtn clear" title="검색 지우기" aria-label="검색 지우기"></button>
+      </div>
+    </div>
+  </header>
   <main id="main" tabindex="-1"></main>
   <footer id="actionbar" class="actionbar" hidden></footer>
 </div>

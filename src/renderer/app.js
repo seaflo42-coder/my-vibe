@@ -22,6 +22,10 @@
     largeSort: 'size',
     busy: false,
     animate: true,
+    mode: 'list',         // 보기 방식: list(목록) · columns(계층) · gallery(갤러리)
+    query: '',            // 검색어
+    searchOpen: false,
+    cur: { dups: {}, reco: {} }, // 계층 · 갤러리에서 지금 보고 있는 묶음과 항목
   };
   const SAFE_HINT = '중복 사본, 설치 파일, 앱 임시 파일처럼 없어도 되는 것들이에요.';
 
@@ -99,17 +103,19 @@
     el.classList.add('has-img');
   }
   async function loadThumb(el) {
-    const p = el.dataset.path;
-    if (!thumbCache.has(p)) {
+    const { path, size } = el.dataset;
+    const key = `${size}:${path}`;
+    if (!thumbCache.has(key)) {
       let url = null;
-      try { url = await api.thumb(p); } catch { /* 기본 아이콘 유지 */ }
-      thumbCache.set(p, url);
+      try { url = await api.thumb(path, Number(size)); } catch { /* 기본 아이콘 유지 */ }
+      thumbCache.set(key, url);
     }
-    if (el.isConnected) paintThumb(el, thumbCache.get(p));
+    if (el.isConnected) paintThumb(el, thumbCache.get(key));
   }
-  function thumb(path, isDir, cls) {
-    const el = h('span', { class: 'thumb ' + (cls || ''), 'data-path': path }, icon(isDir ? 'folder' : 'file'));
-    if (thumbCache.has(path)) paintThumb(el, thumbCache.get(path));
+  function thumb(path, isDir, cls, size = 72) {
+    const el = h('span', { class: 'thumb ' + (cls || ''), 'data-path': path, 'data-size': String(size) }, icon(isDir ? 'folder' : 'file'));
+    const key = `${size}:${path}`;
+    if (thumbCache.has(key)) paintThumb(el, thumbCache.get(key));
     else thumbWatch.observe(el);
     return el;
   }
@@ -144,7 +150,8 @@
     if (S.scanning || S.busy) return;
     S.scanning = true; S.error = null; S.result = null; S.done = null; S.progress = { phase: 'walk', files: 0 };
     S.selected.clear(); S.dupShown = 40; S.catShown = {}; S.view = 'home'; S.animate = true;
-    thumbCache.clear();
+    thumbCache.clear(); S.cur = { dups: {}, reco: {} };
+    if (S.query) { S.query = ''; $('searchInput').value = ''; $('searchBox').classList.remove('has-text'); }
     render();
     await api.startScan({ roots: S.roots, minDupSize: S.minDupSize });
   }
@@ -292,9 +299,26 @@
     if (!ok) return;
     const res = await api.emptyTrash();
     if (!res.ok) {
-      toast(res.reason || '휴지통을 비우지 못했어요.', { label: '휴지통 열기', run: () => api.openTrash() });
+      if (res.why === 'cancelled') return;
+      if (res.why === 'automation') {
+        // 맥이 "말끔이 Finder를 제어"하는 것을 막고 있는 경우: 어디서 켜는지 알려준다
+        const open = await modal({
+          glyph: 'lock', title: 'Finder에 요청할 권한이 없어요',
+          body: '시스템 설정 → 개인정보 보호 및 보안 → 자동화에서 Malkkeum 아래의 Finder를 켜면 여기서 바로 비울 수 있어요. 지금은 Finder에서 휴지통을 열어 직접 비워도 돼요.',
+          confirm: '자동화 설정 열기', cancel: '휴지통 열기',
+        });
+        if (open) api.openAutomationSettings(); else api.openTrash();
+        return;
+      }
+      const open = await modal({
+        glyph: 'alert', tone: 'warn', title: '휴지통을 비우지 못했어요',
+        body: `${res.reason || ''} Finder에서 휴지통을 열어 직접 비울 수 있어요.`.trim(),
+        confirm: '휴지통 열기', cancel: '닫기',
+      });
+      if (open) api.openTrash();
       return;
     }
+    if (res.failed) toast(`항목 ${nf.format(res.failed)}개는 사용 중이라 비우지 못했어요.`);
     if (S.result) {
       S.result.categories = S.result.categories.filter((c) => c.id !== 'trash');
       recount();
@@ -307,7 +331,7 @@
   // ---------- 그리기: 탭 막대 · 제목 줄 ----------
   function go(view, openCat) {
     S.view = view; S.animate = true;
-    if (openCat) S.openCats = new Set([openCat]);
+    if (openCat) { S.openCats = new Set([openCat]); S.cur.reco = { sec: openCat, item: null }; }
     render();
     $('main').scrollTop = 0;
   }
@@ -335,19 +359,18 @@
       kids.push(h('h1', {}, '저장공간'), h('span', { class: 'grow' }), stepper());
       if (S.scanning) kids.push(h('button', { class: 'btn', onclick: cancelScan }, icon('stop'), '검사 중단'));
       else if (r) kids.push(h('button', { class: 'btn', id: 'scanBtn', onclick: startScan }, icon('again'), '다시 검사'));
-    } else if (S.view === 'dups') {
-      kids.push(h('h1', {}, '중복 파일'));
-      if (r && r.groups.length) {
-        kids.push(h('span', { class: 'sub num' }, `묶음 ${nf.format(r.groups.length)}개 · 최대 ${fmt(r.summary.dupWasted)}`), h('span', { class: 'grow' }),
-          h('button', { class: 'btn', onclick: () => { selectDuplicates('keep'); render(); } }, icon('wand'), '추천대로 고르기'),
-          h('button', { class: 'btn plain', onclick: () => { selectDuplicates('newest'); render(); } }, '최근 것만 남기기'),
-          h('button', { class: 'btn plain', onclick: clearDupSelection }, '선택 해제'));
-      }
     } else {
-      kids.push(h('h1', {}, '정리 추천'));
-      if (r && r.categories.length) kids.push(h('span', { class: 'sub num' }, `${r.categories.length}가지 · 최대 ${fmt(r.summary.recoTotal)}`));
+      const dups = S.view === 'dups';
+      kids.push(h('h1', {}, dups ? '중복 파일' : '정리 추천'));
+      if (r && query()) {
+        const secs = sections(S.view);
+        const n = secs.reduce((k, x) => k + (x.action ? 0 : x.items.length), 0);
+        kids.push(h('span', { class: 'sub num' }, `검색 결과 ${nf.format(n)}개`));
+      } else if (r && dups && r.groups.length) kids.push(h('span', { class: 'sub num' }, `묶음 ${nf.format(r.groups.length)}개 · 최대 ${fmt(r.summary.dupWasted)}`));
+      else if (r && !dups && r.categories.length) kids.push(h('span', { class: 'sub num' }, `${r.categories.length}가지 · 최대 ${fmt(r.summary.recoTotal)}`));
     }
     $('toolbar').replaceChildren(...kids);
+    renderTools();
   }
 
   // ---------- 그리기: 저장공간 ----------
@@ -546,112 +569,130 @@
     const ok = await api.preview(path);
     if (!ok) api.reveal(path);
   }
-  /** 파일 한 줄. 화면마다 강조할 내용이 달라서 primary/secondary는 호출하는 쪽이 정한다. */
-  function fileRow(item, { primary, secondary, badge, showThumb = true, onToggle, on = S.selected.has(item.path) }) {
-    return h('label', { class: 'row' + (on ? ' picked' : ''), ondblclick: (e) => { e.preventDefault(); preview(item.path); } },
-      h('input', { type: 'checkbox', checked: on, 'aria-label': `${primary} 선택`, onchange: (e) => onToggle(e.target.checked, e.target) }),
-      showThumb && thumb(item.path, item.isDir),
-      h('div', { class: 'file' }, h('div', { class: 'name', title: item.path }, primary), h('div', { class: 'dir' }, secondary)),
-      badge && h('span', { class: 'keep' }, badge),
-      h('span', { class: 'acts' }, !item.isDir && iconBtn('eye', '미리보기', () => preview(item.path)), iconBtn('finder', 'Finder에서 보기', () => api.reveal(item.path))),
-      h('span', { class: 'date num' }, fmtDate(item.mtimeMs)),
-      h('span', { class: 'size num' }, fmt(item.size)));
+
+  // ---------- 살펴보기 공통: 묶음(중복 묶음 · 추천 종류)과 그 안의 항목 ----------
+  // 세 가지 보기(목록 · 계층 · 갤러리)가 모두 같은 자료와 같은 선택 규칙을 쓴다.
+  const query = () => S.query.trim().toLowerCase();
+  const matches = (p) => { const s = query(); return !s || tilde(p).toLowerCase().includes(s); };
+  function sections(kind) {
+    const r = S.result;
+    if (kind === 'dups') {
+      return r.groups
+        .filter((g) => g.files.some((f) => matches(f.path))) // 묶음은 통째로 봐야 고를 수 있으므로 하나라도 맞으면 전부 보여준다
+        .map((g) => {
+          const keepName = split(g.keep).name;
+          return {
+            id: g.hash, kind, group: g, title: keepName, thumbPath: g.keep, total: g.wasted,
+            sub: `똑같은 파일 ${g.files.length}개 · 각 ${fmt(g.size)}`,
+            // 중복에서는 "어디에 있느냐"가 판단 기준이므로 위치를 제목으로 쓴다
+            items: g.files.map((f) => { const s = split(f.path); return { ...f, label: s.dir, sub: s.name === keepName ? '같은 이름' : s.name, name: s.name, dir: s.dir, keep: f.path === g.keep }; }),
+          };
+        });
+    }
+    return r.categories
+      .map((c) => ({
+        id: c.id, kind, cat: c, title: c.title, tileId: c.id, safety: c.safety, desc: c.desc, total: c.total, unknown: c.unknownSize, action: c.action,
+        items: (c.id === 'large' && S.largeSort === 'old' ? [...c.items].sort((a, b) => a.mtimeMs - b.mtimeMs) : c.items)
+          .filter((i) => matches(i.path))
+          .map((i) => { const s = split(i.path); return { ...i, label: i.name || s.name, sub: s.dir, name: i.name || s.name, dir: s.dir }; }),
+      }))
+      .filter((s) => (query() ? s.items.length > 0 : true));
   }
-
-  // ---------- 그리기: 중복 파일 ----------
-  function viewDups() {
-    if (S.scanning) return [emptyState('search', '검사하는 중이에요', '끝나면 여기에 결과가 나타나요.')];
-    if (!S.result) return [emptyState('copy', '아직 검사하지 않았어요', '검사를 하면 내용이 완전히 같은 파일을 찾아드려요.', true)];
-    const groups = S.result.groups;
-    if (!groups.length) return [emptyState('done', '중복된 파일이 없어요', '똑같은 파일을 찾지 못했어요.')];
-
-    const out = [h('p', { class: 'lead' }, '내용이 한 글자도 다르지 않은 파일끼리 묶었어요. 어디에 있는 파일을 지울지 고르세요. 묶음마다 하나는 꼭 남아요.')];
-    // 폴더를 고르면 그 안의 파일도 함께 사라지므로, "고른 것"에는 고른 폴더 안의 파일도 포함해서 따진다
+  // 폴더를 고르면 그 안의 파일도 함께 사라지므로, "고른 것"에는 고른 폴더 안의 파일도 포함해서 따진다
+  function goneFn() {
     const chosen = [...S.selected.keys()];
-    const gone = (p) => S.selected.has(p) || chosen.some((k) => p.startsWith(k + '/'));
-    for (const g of groups.slice(0, S.dupShown)) {
-      const picked = g.files.filter((f) => gone(f.path)).length;
-      const first = split(g.keep);
-      out.push(h('section', { class: 'box group' },
-        h('div', { class: 'group-head' },
-          thumb(g.keep, false, 'lg'),
-          h('div', { class: 'text' },
-            h('div', { class: 'title' }, first.name),
-            h('div', { class: 'sub num' }, `똑같은 파일 ${g.files.length}개 · 각 ${fmt(g.size)}`)),
-          h('span', { class: 'save num' + (picked ? ' on' : '') }, picked ? `${fmt(picked * g.size)} 선택됨` : `${fmt(g.wasted)} 절약 가능`)),
-        g.files.map((f) => {
-          const s = split(f.path);
-          return fileRow(f, {
-            // 중복에서는 "어디에 있느냐"가 판단 기준이므로 위치를 크게 보여준다
-            primary: s.dir, secondary: s.name === first.name ? '같은 이름' : s.name, showThumb: false,
-            on: gone(f.path),
-            badge: f.path === g.keep && !gone(f.path) ? '원본 추정 · 남김' : null,
-            onToggle: (on, el) => {
-              if (!on && !S.selected.has(f.path)) {
-                el.checked = true;
-                toast('이 파일이 들어 있는 폴더가 선택돼 있어요. 정리 추천에서 폴더 선택을 먼저 해제하세요.');
-                return;
-              }
-              const others = g.files.filter((x) => x !== f && !gone(x.path)).length;
-              if (on && others === 0) {
-                el.checked = false;
-                toast('똑같은 파일 중 하나는 꼭 남겨야 해요.');
-                return;
-              }
-              toggle(f.path, f.size, on); render();
-            },
-          });
-        })));
+    return (p) => S.selected.has(p) || chosen.some((k) => p.startsWith(k + '/'));
+  }
+  /** 항목 하나를 고르거나 해제한다. 어느 보기에서든 이 함수 하나만 거친다. 거절되면 false. */
+  function toggleItem(sec, it, on) {
+    if (sec.group) {
+      const gone = goneFn();
+      if (!on && !S.selected.has(it.path) && gone(it.path)) {
+        toast('이 파일이 들어 있는 폴더가 선택돼 있어요. 정리 추천에서 폴더 선택을 먼저 해제하세요.');
+        return false;
+      }
+      if (on && !sec.group.files.some((x) => x.path !== it.path && !gone(x.path))) {
+        toast('똑같은 파일 중 하나는 꼭 남겨야 해요.');
+        return false;
+      }
     }
-    if (groups.length > S.dupShown) {
-      out.push(h('div', { class: 'more' }, h('button', { class: 'btn', onclick: () => { S.dupShown += 60; renderMain(); } }, `묶음 ${nf.format(groups.length - S.dupShown)}개 더 보기`)));
-    }
-    return out;
+    toggle(it.path, it.size, on);
+    return true;
+  }
+  function checkbox(sec, it, on) {
+    return h('input', {
+      type: 'checkbox', checked: on, 'aria-label': `${it.name} 선택`,
+      onclick: (e) => e.stopPropagation(),
+      onchange: (e) => { if (!toggleItem(sec, it, e.target.checked)) e.target.checked = !e.target.checked; else render(); },
+    });
+  }
+  const keepBadge = (it, on) => it.keep && !on && h('span', { class: 'keep' }, '원본 추정 · 남김');
+  function secHeadTools(sec, gone) {
+    if (sec.group) return null;
+    const picked = sec.items.filter((i) => gone(i.path));
+    const all = sec.items.length > 0 && picked.length === sec.items.length;
+    return h('div', { class: 'cat-tools' },
+      h('label', {}, h('input', {
+        type: 'checkbox', checked: all, indeterminate: picked.length > 0 && !all,
+        onchange: (e) => { for (const i of sec.items) toggle(i.path, i.size, e.target.checked); render(); },
+      }), `전체 선택 (${nf.format(sec.items.length)}개)`),
+      h('span', { class: 'grow' }),
+      sec.id === 'large' && h('div', { class: 'seg' }, [['size', '큰 순서'], ['old', '오래된 순서']].map(([v, l]) =>
+        h('button', { 'aria-pressed': String(S.largeSort === v), onclick: () => { S.largeSort = v; renderMain(); } }, l))));
+  }
+  function trashActions() {
+    return h('div', { class: 'cat-actions' },
+      h('button', { class: 'btn', onclick: emptyTrash }, icon('trash'), '휴지통 비우기…'),
+      h('button', { class: 'btn plain', onclick: () => api.openTrash() }, 'Finder에서 휴지통 열기'));
+  }
+  function dupActions() {
+    return h('div', { class: 'actions-row' },
+      h('button', { class: 'btn', onclick: () => { selectDuplicates('keep'); render(); } }, icon('wand'), '추천대로 고르기'),
+      h('button', { class: 'btn plain', onclick: () => { selectDuplicates('newest'); render(); } }, '최근 것만 남기기'),
+      h('button', { class: 'btn plain', onclick: clearDupSelection }, '선택 해제'));
   }
 
-  // ---------- 그리기: 정리 추천 ----------
-  function viewReco() {
-    if (S.scanning) return [emptyState('search', '검사하는 중이에요', '끝나면 여기에 결과가 나타나요.')];
-    if (!S.result) return [emptyState('spark', '아직 검사하지 않았어요', '검사를 하면 지워도 되는 파일을 추천해 드려요.', true)];
-    const cats = S.result.categories;
-    if (!cats.length) return [emptyState('done', '추천할 항목이 없어요', '정리할 만한 파일을 찾지 못했어요.')];
-
-    const out = [h('p', { class: 'lead' }, '지워도 괜찮은 것부터 순서대로 보여드려요. 줄을 두 번 누르면 내용을 미리 볼 수 있어요.')];
-    for (const c of cats) {
-      const open = S.openCats.has(c.id);
-      const picked = c.items.filter((i) => S.selected.has(i.path));
+  // ---------- 보기 1: 목록 ----------
+  function viewList(secs, kind) {
+    const gone = goneFn();
+    const out = [];
+    if (kind === 'dups') {
+      out.push(h('div', { class: 'leadrow' }, h('p', { class: 'lead' }, '내용이 한 글자도 다르지 않은 파일끼리 묶었어요. 어디에 있는 파일을 지울지 고르세요. 묶음마다 하나는 꼭 남아요.'), dupActions()));
+      for (const sec of secs.slice(0, S.dupShown)) {
+        const picked = sec.items.filter((f) => gone(f.path)).length;
+        out.push(h('section', { class: 'box group' },
+          h('div', { class: 'group-head' },
+            thumb(sec.thumbPath, false, 'lg'),
+            h('div', { class: 'text' }, h('div', { class: 'title' }, sec.title), h('div', { class: 'sub num' }, sec.sub)),
+            h('span', { class: 'save num' + (picked ? ' on' : '') }, picked ? `${fmt(picked * sec.group.size)} 선택됨` : `${fmt(sec.total)} 절약 가능`)),
+          sec.items.map((it) => fileRow(sec, it, gone(it.path), false))));
+      }
+      if (secs.length > S.dupShown) {
+        out.push(h('div', { class: 'more' }, h('button', { class: 'btn', onclick: () => { S.dupShown += 60; renderMain(); } }, `묶음 ${nf.format(secs.length - S.dupShown)}개 더 보기`)));
+      }
+      return out;
+    }
+    out.push(h('p', { class: 'lead' }, '지워도 괜찮은 것부터 순서대로 보여드려요. 줄을 두 번 누르면 내용을 미리 볼 수 있어요.'));
+    for (const sec of secs) {
+      const open = S.openCats.has(sec.id) || !!query();
+      const picked = sec.items.filter((i) => gone(i.path));
       const card = h('section', { class: 'box cat' + (open ? ' open' : '') },
-        h('button', { class: 'cell tiled cat-head', 'aria-expanded': String(open), onclick: () => { open ? S.openCats.delete(c.id) : S.openCats.add(c.id); renderMain(); } },
-          tile(c.id),
+        h('button', { class: 'cell tiled cat-head', 'aria-expanded': String(open), onclick: () => { S.openCats.has(sec.id) ? S.openCats.delete(sec.id) : S.openCats.add(sec.id); renderMain(); } },
+          tile(sec.tileId),
           h('div', { class: 'text' },
-            h('div', { class: 't' }, c.title, h('span', { class: 'tag ' + c.safety }, c.safety === 'safe' ? '지워도 안전' : '확인 후 삭제')),
-            h('div', { class: 'd' }, c.desc)),
-          h('span', { class: 'v num' }, c.unknownSize ? '확인 불가' : picked.length ? `${fmt(picked.reduce((n, i) => n + i.size, 0))} / ${fmt(c.total)}` : fmt(c.total)),
+            h('div', { class: 't' }, sec.title, h('span', { class: 'tag ' + sec.safety }, sec.safety === 'safe' ? '지워도 안전' : '확인 후 삭제')),
+            h('div', { class: 'd' }, sec.desc)),
+          h('span', { class: 'v num' }, sec.unknown ? '확인 불가' : picked.length ? `${fmt(picked.reduce((n, i) => n + i.size, 0))} / ${fmt(sec.total)}` : fmt(sec.total)),
           icon('chev', 'chev')));
       if (open) {
         const body = h('div', { class: 'cat-body' });
-        if (c.action === 'emptyTrash') {
-          body.append(h('div', { class: 'cat-actions' },
-            h('button', { class: 'btn', onclick: emptyTrash }, icon('trash'), '휴지통 비우기…'),
-            h('button', { class: 'btn plain', onclick: () => api.openTrash() }, 'Finder에서 휴지통 열기')));
-        } else {
-          const all = picked.length === c.items.length;
-          const items = c.id === 'large' && S.largeSort === 'old' ? [...c.items].sort((a, b) => a.mtimeMs - b.mtimeMs) : c.items;
-          body.append(h('div', { class: 'cat-tools' },
-            h('label', {}, h('input', {
-              type: 'checkbox', checked: all, indeterminate: picked.length > 0 && !all,
-              onchange: (e) => { for (const i of c.items) toggle(i.path, i.size, e.target.checked); render(); },
-            }), `전체 선택 (${nf.format(c.items.length)}개)`),
-            h('span', { class: 'grow' }),
-            c.id === 'large' && h('div', { class: 'seg' }, [['size', '큰 순서'], ['old', '오래된 순서']].map(([v, l]) =>
-              h('button', { 'aria-pressed': String(S.largeSort === v), onclick: () => { S.largeSort = v; renderMain(); } }, l)))));
-          const shown = S.catShown[c.id] || 30;
-          for (const i of items.slice(0, shown)) {
-            const s = split(i.path);
-            body.append(fileRow(i, { primary: i.name || s.name, secondary: s.dir, onToggle: (on) => { toggle(i.path, i.size, on); render(); } }));
-          }
-          if (items.length > shown) {
-            body.append(h('div', { class: 'cat-more' }, h('button', { class: 'btn small', onclick: () => { S.catShown[c.id] = shown + 100; renderMain(); } }, `${nf.format(items.length - shown)}개 더 보기`)));
+        if (sec.action === 'emptyTrash') body.append(trashActions());
+        else {
+          body.append(secHeadTools(sec, gone));
+          const shown = S.catShown[sec.id] || 30;
+          for (const it of sec.items.slice(0, shown)) body.append(fileRow(sec, it, gone(it.path), true));
+          if (sec.items.length > shown) {
+            body.append(h('div', { class: 'cat-more' }, h('button', { class: 'btn small', onclick: () => { S.catShown[sec.id] = shown + 100; renderMain(); } }, `${nf.format(sec.items.length - shown)}개 더 보기`)));
           }
         }
         card.append(body);
@@ -660,15 +701,217 @@
     }
     return out;
   }
+  function fileRow(sec, it, on, showThumb) {
+    return h('label', { class: 'row' + (on ? ' picked' : ''), ondblclick: (e) => { e.preventDefault(); preview(it.path); } },
+      checkbox(sec, it, on),
+      showThumb && thumb(it.path, it.isDir),
+      h('div', { class: 'file' }, h('div', { class: 'name', title: it.path }, it.label), h('div', { class: 'dir' }, it.sub)),
+      keepBadge(it, on),
+      h('span', { class: 'acts' }, !it.isDir && iconBtn('eye', '미리보기', () => preview(it.path)), iconBtn('finder', 'Finder에서 보기', () => api.reveal(it.path))),
+      h('span', { class: 'date num' }, fmtDate(it.mtimeMs)),
+      h('span', { class: 'size num' }, fmt(it.size)));
+  }
+
+  // ---------- 보기 2 · 3 공통: 지금 보고 있는 묶음과 항목 ----------
+  let NAV = null; // 키보드 이동에 쓰는 현재 화면의 자료
+  function current(secs, kind) {
+    const cur = S.cur[kind];
+    const sec = secs.find((s) => s.id === cur.sec) || secs[0];
+    const it = sec && (sec.items.find((i) => i.path === cur.item) || sec.items[0]);
+    cur.sec = sec ? sec.id : null; cur.item = it ? it.path : null;
+    return { sec, it };
+  }
+  function pick(kind, secId, itemPath) {
+    S.cur[kind] = { sec: secId, item: itemPath || null };
+    renderMain();
+  }
+  /** 항목 하나의 자세한 정보: 큰 미리보기, 위치, 크기, 날짜, 고르기 버튼 */
+  function detail(sec, it, on, big) {
+    if (!it) return h('div', { class: 'detail empty-detail' }, sec && sec.action ? trashActions() : h('p', {}, '항목을 선택하면 자세히 볼 수 있어요.'));
+    return h('div', { class: 'detail' + (big ? ' big' : '') },
+      h('div', { class: 'stage', ondblclick: () => preview(it.path) }, thumb(it.path, it.isDir, 'xl', 512)),
+      h('div', { class: 'meta' },
+        h('div', { class: 'dname', title: it.path }, it.name),
+        h('dl', {},
+          h('dt', {}, '위치'), h('dd', {}, it.dir),
+          h('dt', {}, '크기'), h('dd', { class: 'num' }, fmt(it.size)),
+          h('dt', {}, '수정한 날짜'), h('dd', { class: 'num' }, fmtDate(it.mtimeMs) || '알 수 없음'),
+          h('dt', {}, '종류'), h('dd', {}, sec.group ? '중복 파일' : sec.title)),
+        keepBadge(it, on),
+        h('div', { class: 'dbtns' },
+          h('button', { class: 'btn' + (on ? '' : ' primary'), onclick: () => { if (toggleItem(sec, it, !on)) render(); } }, icon(on ? 'x' : 'check'), on ? '선택 해제' : '지울 항목으로 고르기'),
+          !it.isDir && iconBtn('eye', '미리보기', () => preview(it.path)),
+          iconBtn('finder', 'Finder에서 보기', () => api.reveal(it.path)))));
+  }
+
+  // ---------- 보기 2: 계층 (묶음 → 항목 → 자세히) ----------
+  function viewColumns(secs, kind) {
+    const gone = goneFn();
+    const { sec, it } = current(secs, kind);
+    NAV = { kind, secs, sec, it, items: sec ? sec.items : [] };
+    const col1 = h('div', { class: 'col', 'data-scroll': 'c1', role: 'listbox', 'aria-label': kind === 'dups' ? '중복 묶음' : '종류' },
+      secs.map((s) => {
+        const n = s.items.filter((i) => gone(i.path)).length;
+        return h('button', { class: 'crow', role: 'option', 'aria-selected': String(s === sec), onclick: () => pick(kind, s.id) },
+          s.group ? thumb(s.thumbPath, false) : tile(s.tileId),
+          h('div', { class: 'text' }, h('div', { class: 'name' }, s.title), h('div', { class: 'dir num' }, n ? `${nf.format(n)}개 선택됨` : s.unknown ? '확인 불가' : fmt(s.total))),
+          icon('chev', 'chev'));
+      }));
+    const col2 = h('div', { class: 'col', 'data-scroll': 'c2', role: 'listbox', 'aria-label': '항목' });
+    if (sec) {
+      if (sec.action === 'emptyTrash') col2.append(trashActions());
+      else {
+        const tools = secHeadTools(sec, gone);
+        if (tools) col2.append(tools);
+        const shown = S.catShown['col:' + sec.id] || 200;
+        for (const i of sec.items.slice(0, shown)) {
+          const on = gone(i.path);
+          col2.append(h('div', { class: 'crow' + (on ? ' picked' : ''), role: 'option', 'aria-selected': String(i === it), onclick: () => pick(kind, sec.id, i.path), ondblclick: () => preview(i.path) },
+            checkbox(sec, i, on),
+            !sec.group && thumb(i.path, i.isDir),
+            h('div', { class: 'text' }, h('div', { class: 'name', title: i.path }, i.label), h('div', { class: 'dir' }, i.sub)),
+            h('span', { class: 'size num' }, fmt(i.size))));
+        }
+        if (sec.items.length > shown) col2.append(h('div', { class: 'cat-more' }, h('button', { class: 'btn small', onclick: () => { S.catShown['col:' + sec.id] = shown + 300; renderMain(); } }, `${nf.format(sec.items.length - shown)}개 더 보기`)));
+      }
+    }
+    return [kind === 'dups' && dupActions(),
+      h('div', { class: 'browser columns' }, col1, col2, h('div', { class: 'col wide', 'data-scroll': 'c3' }, detail(sec, it, it ? gone(it.path) : false, false)))];
+  }
+
+  // ---------- 보기 3: 갤러리 (큰 미리보기 + 아래 미리보기 줄) ----------
+  function viewGallery(secs, kind) {
+    const gone = goneFn();
+    const flat = [];
+    for (const s of secs) if (!s.action) for (const i of s.items) flat.push({ s, i });
+    const cur = S.cur[kind];
+    let at = flat.findIndex((x) => x.i.path === cur.item && x.s.id === cur.sec);
+    if (at < 0) at = flat.findIndex((x) => x.i.path === cur.item);
+    if (at < 0) at = 0;
+    const here = flat[at];
+    if (here) { cur.sec = here.s.id; cur.item = here.i.path; }
+    NAV = { kind, flat, at };
+    const lo = Math.max(0, at - 150);
+    const strip = h('div', { class: 'strip', 'data-scroll': 'strip', role: 'listbox', 'aria-label': '미리보기 줄' });
+    let lastSec = null;
+    for (const x of flat.slice(lo, lo + 300)) {
+      if (x.s !== lastSec) { strip.append(h('span', { class: 'strip-label' }, x.s.title)); lastSec = x.s; }
+      const on = gone(x.i.path);
+      strip.append(h('button', {
+        class: 'cellthumb' + (on ? ' picked' : ''), role: 'option', 'aria-selected': String(x === here), title: x.i.name,
+        onclick: () => pick(kind, x.s.id, x.i.path), ondblclick: () => preview(x.i.path),
+      }, thumb(x.i.path, x.i.isDir, 'md', 144), on && h('span', { class: 'tick' }, icon('check'))));
+    }
+    return [kind === 'dups' && dupActions(),
+      h('div', { class: 'browser gallery' },
+        here ? detail(here.s, here.i, gone(here.i.path), true) : detail(null, null, false, true),
+        h('div', { class: 'strip-wrap' }, h('span', { class: 'count num' }, flat.length ? `${nf.format(at + 1)} / ${nf.format(flat.length)}` : ''), strip))];
+  }
+
+  // ---------- 중복 파일 · 정리 추천 화면 ----------
+  function viewBrowse(kind) {
+    if (S.scanning) return [emptyState('search', '검사하는 중이에요', '끝나면 여기에 결과가 나타나요.')];
+    if (!S.result) {
+      return [kind === 'dups'
+        ? emptyState('copy', '아직 검사하지 않았어요', '검사를 하면 내용이 완전히 같은 파일을 찾아드려요.', true)
+        : emptyState('spark', '아직 검사하지 않았어요', '검사를 하면 지워도 되는 파일을 추천해 드려요.', true)];
+    }
+    const total = kind === 'dups' ? S.result.groups.length : S.result.categories.length;
+    if (!total) return [emptyState('done', kind === 'dups' ? '중복된 파일이 없어요' : '추천할 항목이 없어요', kind === 'dups' ? '똑같은 파일을 찾지 못했어요.' : '정리할 만한 파일을 찾지 못했어요.')];
+    const secs = sections(kind);
+    if (!secs.length) {
+      return [h('div', { class: 'empty' }, h('div', { class: 'orb' }, icon('search')), h('h2', {}, '찾는 항목이 없어요'),
+        h('p', {}, `"${S.query.trim()}"에 맞는 이름이나 폴더가 없어요.`),
+        h('button', { class: 'btn', onclick: () => setQuery('') }, '검색 지우기'))];
+    }
+    return S.mode === 'columns' ? viewColumns(secs, kind) : S.mode === 'gallery' ? viewGallery(secs, kind) : viewList(secs, kind);
+  }
+  const browsing = () => S.view !== 'home' && !!S.result && !S.scanning;
+
+  // ---------- 검색 · 보기 방식 ----------
+  function setQuery(v) {
+    S.query = v;
+    if ($('searchInput').value !== v) $('searchInput').value = v;
+    $('searchBox').classList.toggle('has-text', !!v);
+    renderMain();
+  }
+  function openSearch(open) {
+    S.searchOpen = open;
+    $('searchBox').classList.toggle('open', open);
+    if (open) $('searchInput').focus();
+    else { $('searchInput').blur(); if (S.query) setQuery(''); }
+  }
+  function setMode(m) {
+    S.mode = m; S.animate = true;
+    try { localStorage.setItem('mode', m); } catch { /* 저장 못 해도 괜찮음 */ }
+    renderMain();
+  }
+  function setupTools() {
+    $('searchBtn').append(icon('search'));
+    $('searchClear').append(icon('x'));
+    $('searchBtn').addEventListener('click', () => openSearch(!S.searchOpen || !S.query ? !S.searchOpen : true));
+    $('searchClear').addEventListener('click', () => { setQuery(''); $('searchInput').focus(); });
+    // 한글은 조합이 끝난 뒤에 반영해야 글자가 깨지지 않는다
+    let composing = false;
+    const input = $('searchInput');
+    input.addEventListener('compositionstart', () => { composing = true; });
+    input.addEventListener('compositionend', () => { composing = false; setQuery(input.value); });
+    input.addEventListener('input', () => { if (!composing) setQuery(input.value); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); openSearch(false); } });
+    $('viewSeg').replaceChildren(...[['list', '목록', 'list'], ['columns', '계층', 'columns'], ['gallery', '갤러리', 'gallery']].map(([m, label, ic]) =>
+      h('button', { 'data-mode': m, title: `${label}으로 보기`, 'aria-label': `${label}으로 보기`, onclick: () => setMode(m) }, icon(ic))));
+  }
+  function renderTools() {
+    $('tbTools').hidden = !browsing();
+    for (const b of $('viewSeg').children) b.setAttribute('aria-pressed', String(b.dataset.mode === S.mode));
+  }
+  // 계층 · 갤러리에서의 키보드: 화살표로 이동, 스페이스로 미리보기, 리턴으로 고르기
+  document.addEventListener('keydown', (e) => {
+    if (!browsing() || S.mode === 'list' || !NAV || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target.closest('input, textarea, .modal')) return;
+    const { kind } = NAV;
+    let handled = true;
+    if (S.mode === 'gallery') {
+      const move = (d) => { const x = NAV.flat[NAV.at + d]; if (x) pick(kind, x.s.id, x.i.path); };
+      const x = NAV.flat[NAV.at];
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') move(1);
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') move(-1);
+      else if (e.key === ' ' && x) preview(x.i.path);
+      else if (e.key === 'Enter' && x) { if (toggleItem(x.s, x.i, !goneFn()(x.i.path))) render(); } else handled = false;
+    } else {
+      const { secs, sec, it, items } = NAV;
+      const moveItem = (d) => { const n = items[items.indexOf(it) + d]; if (n) pick(kind, sec.id, n.path); };
+      const moveSec = (d) => { const n = secs[secs.indexOf(sec) + d]; if (n) pick(kind, n.id); };
+      if (e.key === 'ArrowDown') moveItem(1);
+      else if (e.key === 'ArrowUp') moveItem(-1);
+      else if (e.key === 'ArrowRight') moveSec(1);
+      else if (e.key === 'ArrowLeft') moveSec(-1);
+      else if (e.key === ' ' && it) preview(it.path);
+      else if (e.key === 'Enter' && it) { if (toggleItem(sec, it, !goneFn()(it.path))) render(); } else handled = false;
+    }
+    if (handled) e.preventDefault();
+  });
 
   // ---------- 그리기: 전체 ----------
   function renderMain() {
     const main = $('main');
     const top = main.scrollTop;
-    const kids = S.view === 'dups' ? viewDups() : S.view === 'reco' ? viewReco() : viewHome();
-    main.replaceChildren(h('div', { class: 'wrap' + (S.animate ? ' fresh' : '') }, kids));
+    const scrolls = {};
+    for (const el of main.querySelectorAll('[data-scroll]')) scrolls[el.dataset.scroll] = [el.scrollTop, el.scrollLeft];
+    NAV = null;
+    const kids = S.view === 'home' ? viewHome() : viewBrowse(S.view);
+    const fill = browsing() && S.mode !== 'list' && !!NAV; // 계층 · 갤러리는 칸마다 따로 스크롤한다
+    main.classList.toggle('fill', fill);
+    main.replaceChildren(h('div', { class: 'wrap' + (S.animate ? ' fresh' : '') + (fill ? ' fill' : '') }, kids));
+    const fresh = S.animate;
     S.animate = false;
     main.scrollTop = top;
+    for (const el of main.querySelectorAll('[data-scroll]')) {
+      const v = scrolls[el.dataset.scroll];
+      if (v && !fresh) { el.scrollTop = v[0]; el.scrollLeft = v[1]; }
+    }
+    // 지금 보고 있는 항목이 화면 밖이면 보이게 한다
+    for (const el of main.querySelectorAll('.col [aria-selected="true"], .strip [aria-selected="true"]')) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     renderToolbar();
     renderProgress();
   }
@@ -694,6 +937,9 @@
   if (api.onAccent) api.onAccent(applyAccent);
   if (api.onMenuScan) api.onMenuScan(startScan);
   if (api.onMenuTrash) api.onMenuTrash(trashSelected);
+  if (api.onMenuFind) api.onMenuFind(() => { if (browsing()) openSearch(true); });
+  try { const m = localStorage.getItem('mode'); if (['list', 'columns', 'gallery'].includes(m)) S.mode = m; } catch { /* 기본값 사용 */ }
+  setupTools();
   render();
   refreshDisk();
 })();

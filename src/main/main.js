@@ -6,6 +6,7 @@ const fsp = require('fs/promises');
 const { execFile } = require('child_process');
 const { Worker } = require('worker_threads');
 const { validateDeletion } = require('../core/safety');
+const { classifyFinderError, emptyTrashDir } = require('../core/trash');
 
 let win = null;
 let worker = null;
@@ -141,16 +142,17 @@ ipcMain.handle('files:reveal', (_e, p) => {
 });
 
 // 파일의 실제 모습: 사진·문서는 미리보기 그림, 그 밖에는 맥이 쓰는 파일 아이콘
-ipcMain.handle('files:thumb', async (_e, p) => {
+ipcMain.handle('files:thumb', async (_e, p, size) => {
   if (typeof p !== 'string' || !lastScan.known.has(p)) return null;
+  const px = Math.min(640, Math.max(32, Number(size) || 72)); // 갤러리의 큰 미리보기는 더 크게
   if (IS_MAC) {
     try {
-      const img = await nativeImage.createThumbnailFromPath(p, { width: 72, height: 72 });
+      const img = await nativeImage.createThumbnailFromPath(p, { width: px, height: px });
       if (!img.isEmpty()) return img.toDataURL();
     } catch { /* 미리보기를 만들 수 없는 종류 → 아이콘으로 */ }
   }
   try {
-    const img = await app.getFileIcon(p, { size: 'normal' });
+    const img = await app.getFileIcon(p, { size: px > 100 ? 'large' : 'normal' });
     return img.isEmpty() ? null : img.toDataURL();
   } catch {
     return null;
@@ -169,13 +171,40 @@ ipcMain.handle('trash:open', async () => {
   return true;
 });
 
-ipcMain.handle('trash:empty', () => new Promise((resolve) => {
-  if (process.platform !== 'darwin') return resolve({ ok: false, reason: '맥에서만 쓸 수 있어요' });
-  execFile('/usr/bin/osascript', ['-e', 'tell application "Finder" to empty trash'], { timeout: 120000 }, (err) => {
-    if (err) resolve({ ok: false, reason: 'Finder에 요청하지 못했어요. 휴지통을 직접 열어 비워주세요.' });
-    else resolve({ ok: true });
+// Finder에 휴지통 비우기를 부탁한다. Finder를 앞으로 불러와야 "정말 비울까요?" 확인 창이 보인다.
+function askFinderToEmptyTrash() {
+  const script = ['tell application "Finder"', 'activate', 'with timeout of 280 seconds', 'empty trash', 'end timeout', 'end tell'];
+  return new Promise((resolve) => {
+    execFile('/usr/bin/osascript', script.flatMap((l) => ['-e', l]), { timeout: 300000 }, (err, _out, stderr) => {
+      if (!err) return resolve({ ok: true });
+      resolve({ ok: false, why: classifyFinderError(err, String(stderr || '')) });
+    });
   });
-}));
+}
+
+const EMPTY_REASONS = {
+  automation: '말끔이 Finder에 요청하도록 허용되어 있지 않아요.',
+  timeout: 'Finder가 응답하지 않았어요. Finder에 확인 창이 떠 있는지 봐 주세요.',
+  'finder-down': 'Finder가 실행 중이 아니에요.',
+  unknown: 'Finder가 휴지통을 비우지 못했어요. 사용 중인 파일이 있을 수 있어요.',
+};
+
+ipcMain.handle('trash:empty', async () => {
+  if (!IS_MAC) return { ok: false, why: 'unsupported', reason: '맥에서만 쓸 수 있어요' };
+  const finder = await askFinderToEmptyTrash();
+  if (finder.ok) { if (win) win.focus(); return { ok: true, via: 'finder' }; }
+  if (win) win.focus();
+  if (finder.why === 'cancelled') return { ok: false, why: 'cancelled', reason: 'Finder에서 취소했어요.' };
+  // Finder를 쓸 수 없으면 휴지통 폴더를 직접 비운다 (전체 디스크 접근 권한이 있을 때만 가능)
+  const direct = await emptyTrashDir(HOME);
+  if (direct.ok) return { ok: true, via: 'direct', removed: direct.removed, failed: direct.failed };
+  return { ok: false, why: finder.why, reason: EMPTY_REASONS[finder.why] || EMPTY_REASONS.unknown };
+});
+
+ipcMain.handle('app:openAutomationSettings', async () => {
+  if (IS_MAC) await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation');
+  return true;
+});
 
 ipcMain.handle('app:accent', () => (IS_MAC ? accentHex() : null));
 
@@ -213,7 +242,11 @@ function buildMenu() {
     {
       label: '편집',
       submenu: [
+        { label: '찾기', accelerator: 'CmdOrCtrl+F', click: () => send('menu:find') },
+        { type: 'separator' },
+        { role: 'cut', label: '오려두기' },
         { role: 'copy', label: '복사하기' },
+        { role: 'paste', label: '붙여넣기' },
         { role: 'selectAll', label: '전체 선택' },
       ],
     },

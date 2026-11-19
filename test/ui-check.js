@@ -50,6 +50,38 @@ const { makeHome } = require('./fixture');
     await page.locator('.group').first().locator('.row:not(.picked) input').click();
     assert.strictEqual(await page.locator('.row.picked').count(), 3);
 
+    // 검색: 이름이나 폴더로 좁혀 본다
+    await page.click('#searchBtn');
+    await page.fill('#searchInput', 'photo');
+    assert.strictEqual(await page.locator('.group').count(), 1);
+    assert.match(await page.locator('#toolbar .sub').innerText(), /검색 결과 2개/);
+    await page.fill('#searchInput', '없는이름');
+    assert.ok(await page.locator('text=찾는 항목이 없어요').isVisible());
+    await page.click('#searchClear');
+    assert.strictEqual(await page.locator('.group').count(), 2);
+
+    // 계층 보기: 묶음 → 항목 → 자세히. 여기서도 마지막 사본은 고를 수 없다
+    await page.click('#viewSeg [data-mode="columns"]');
+    assert.strictEqual(await page.locator('.browser.columns .col').count(), 3);
+    assert.strictEqual(await page.locator('.col').nth(1).locator('.crow.picked').count(), 2);
+    await page.locator('.col').nth(1).locator('.crow:not(.picked) input').click();
+    assert.strictEqual(await page.locator('.col').nth(1).locator('.crow.picked').count(), 2);
+    await page.keyboard.press('ArrowDown');
+    assert.match(await page.locator('.detail .dname').innerText(), /report/);
+    await page.waitForTimeout(4200);
+    await shot('3b-columns');
+
+    // 갤러리 보기: 큰 미리보기 + 아래 줄, 화살표로 이동
+    await page.click('#viewSeg [data-mode="gallery"]');
+    assert.strictEqual(await page.locator('.strip .cellthumb').count(), 5);
+    assert.strictEqual(await page.locator('.strip .cellthumb.picked').count(), 3);
+    const before = await page.locator('.strip-wrap .count').innerText();
+    await page.keyboard.press('ArrowRight');
+    assert.notStrictEqual(await page.locator('.strip-wrap .count').innerText(), before);
+    await page.waitForTimeout(500);
+    await shot('3c-gallery');
+    await page.click('#viewSeg [data-mode="list"]');
+
     // 정리 추천
     await page.click('.nav-item:has-text("정리 추천")');
     await page.click('.cat-head:has-text("앱 임시 파일")');
