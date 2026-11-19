@@ -256,8 +256,9 @@
         glyph: 'shield', title: `${nf.format(res.failed.length)}개 항목은 그대로 뒀어요`,
         body: res.trashed.length ? `나머지 ${nf.format(res.trashed.length)}개는 휴지통으로 옮겼어요.` : '안전을 위해 옮기지 않았어요.',
         list: failedByReason(res.failed), stack: true,
-        confirm: '확인', cancel: null,
-      });
+        // 맥이 접근을 막은 경우에는 어디서 풀 수 있는지 바로 안내한다
+        confirm: res.needsPermission ? '권한 설정 열기' : '확인', cancel: res.needsPermission ? '닫기' : null,
+      }).then((open) => { if (open && res.needsPermission) api.openPrivacySettings(); });
     }
   }
   function failedByReason(failed) {

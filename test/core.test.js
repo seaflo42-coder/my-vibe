@@ -158,6 +158,13 @@ test('휴지통 비우기: 실패 원인을 가려내고, 휴지통 폴더만 �
   assert.strictEqual(classifyFinderError(new Error('x'), 'execution error: User canceled. (-128)'), 'cancelled');
   assert.strictEqual(classifyFinderError(Object.assign(new Error('x'), { killed: true }), ''), 'timeout');
   assert.strictEqual(classifyFinderError(new Error('x'), 'something else (-50)'), 'unknown');
+  // Finder에 넘기는 경로는 스크립트 글자가 아니라 인자로만 전달된다
+  const { finderTrashArgs, chunk } = require('../src/core/trash');
+  const odd = '/Users/x/Downloads/이름 "따옴표" & $(위험).pptx';
+  const args = finderTrashArgs([odd]);
+  assert.strictEqual(args[args.length - 1], odd);
+  assert.ok(!args.slice(0, args.indexOf('--')).some((a) => a.includes('따옴표')));
+  assert.deepStrictEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
 
   const fs2 = require('fs');
   fs2.mkdirSync(path.join(home, '.Trash/folder/deep'), { recursive: true });

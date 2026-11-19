@@ -45,4 +45,25 @@ async function emptyTrashDir(home) {
   return { ok: failed === 0 || removed > 0, removed, failed };
 }
 
-module.exports = { classifyFinderError, emptyTrashDir };
+// Finder에게 여러 항목을 휴지통으로 옮겨 달라고 부탁하는 스크립트.
+// 경로는 스크립트 글자에 끼워 넣지 않고 인자로만 넘긴다 (이름에 따옴표 등이 있어도 안전하도록).
+const FINDER_TRASH_SCRIPT = [
+  'on run argv',
+  'set theItems to {}',
+  'repeat with p in argv',
+  'set end of theItems to (POSIX file (p as text)) as alias',
+  'end repeat',
+  'tell application "Finder" to delete theItems',
+  'end run',
+];
+function finderTrashArgs(paths) {
+  return [...FINDER_TRASH_SCRIPT.flatMap((l) => ['-e', l]), '--', ...paths];
+}
+/** 목록을 n개씩 나눈다 (명령 한 번에 넘길 수 있는 길이에 한계가 있어서). */
+function chunk(list, n) {
+  const out = [];
+  for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n));
+  return out;
+}
+
+module.exports = { classifyFinderError, emptyTrashDir, finderTrashArgs, chunk };

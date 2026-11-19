@@ -6,7 +6,7 @@ const fsp = require('fs/promises');
 const { execFile } = require('child_process');
 const { Worker } = require('worker_threads');
 const { validateDeletion } = require('../core/safety');
-const { classifyFinderError, emptyTrashDir } = require('../core/trash');
+const { classifyFinderError, emptyTrashDir, finderTrashArgs, chunk } = require('../core/trash');
 
 let win = null;
 let worker = null;
@@ -115,25 +115,64 @@ ipcMain.handle('scan:start', (_e, opts = {}) => {
 
 ipcMain.handle('scan:cancel', () => { stopWorker(); return true; });
 
+// 앱이 직접 옮기지 못한 항목을 Finder에게 대신 옮겨 달라고 부탁한다.
+// 맥이 말끔의 접근을 막은 폴더라도 Finder는 옮길 수 있다. 실제로 사라졌는지는 하나씩 확인한다.
+async function trashViaFinder(paths) {
+  const moved = [];
+  let why = null;
+  if (!IS_MAC || !paths.length) return { moved, why: 'unsupported' };
+  for (const part of chunk(paths, 150)) {
+    const res = await new Promise((resolve) => {
+      execFile('/usr/bin/osascript', finderTrashArgs(part), { timeout: 180000 }, (err, _out, stderr) => {
+        resolve(err ? classifyFinderError(err, String(stderr || '')) : null);
+      });
+    });
+    if (res) why = res;
+    for (const p of part) {
+      try { await fsp.lstat(p); } catch { moved.push(p); } // 원래 자리에 없으면 옮겨진 것
+    }
+    if (res === 'automation') break; // 권한이 없으면 나머지도 똑같이 실패한다
+  }
+  return { moved, why };
+}
+
 ipcMain.handle('files:trash', async (_e, paths) => {
   if (!Array.isArray(paths)) return { trashed: [], failed: [], freed: 0 };
   const { ok, rejected } = await validateDeletion(paths, { home: HOME, ...lastScan });
   const trashed = [];
   const failed = [...rejected];
   let freed = 0;
+  let needsPermission = false;
+  const markTrashed = (p) => {
+    trashed.push(p);
+    const k = lastScan.known.get(p);
+    if (k) freed += k.size;
+    lastScan.known.delete(p);
+  };
+  const blocked = []; // 앱이 직접 옮기지 못한 항목과 맥이 알려준 이유
   for (let i = 0; i < ok.length; i++) {
     const p = ok[i];
     try {
       await shell.trashItem(p);
-      trashed.push(p);
-      freed += lastScan.known.get(p).size;
-      lastScan.known.delete(p);
+      markTrashed(p);
     } catch (e) {
-      // 맥이 알려준 이유를 그대로 보여줘야 무엇이 문제인지 알 수 있다
-      const why = String((e && e.message) || '').replace(/\s+/g, ' ').slice(0, 140);
-      failed.push({ path: p, reason: why ? `휴지통으로 옮기지 못했어요 (${why})` : '휴지통으로 옮기지 못했어요 (권한이 없거나 사용 중)' });
+      blocked.push({ path: p, why: String((e && e.message) || '').replace(/\s+/g, ' ').slice(0, 140) });
     }
     if (i % 5 === 0) send('trash:progress', { done: i + 1, total: ok.length });
+  }
+  if (blocked.length) {
+    // 맥이 말끔의 접근을 막은 경우: Finder에게 대신 옮겨 달라고 부탁한다
+    const viaFinder = await trashViaFinder(blocked.map((b) => b.path));
+    if (win) win.focus();
+    const moved = new Set(viaFinder.moved);
+    for (const b of blocked) {
+      if (moved.has(b.path)) { markTrashed(b.path); continue; }
+      needsPermission = true;
+      const hint = viaFinder.why === 'automation'
+        ? '맥이 말끔의 접근을 막고 있어요. 전체 디스크 접근 권한에서 Malkkeum을 켜 주세요'
+        : b.why || '권한이 없거나 사용 중';
+      failed.push({ path: b.path, reason: `휴지통으로 옮기지 못했어요 (${hint})` });
+    }
   }
   // 옮긴 파일을 중복 묶음에서 빼고, 사본이 하나만 남은 묶음은 없앤다
   if (trashed.length) {
@@ -142,7 +181,7 @@ ipcMain.handle('files:trash', async (_e, paths) => {
       .map((g) => ({ ...g, files: g.files.filter((f) => !goneNow(f.path)) }))
       .filter((g) => g.files.length > 1);
   }
-  return { trashed, failed, freed };
+  return { trashed, failed, freed, needsPermission };
 });
 
 ipcMain.handle('files:reveal', (_e, p) => {
