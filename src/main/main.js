@@ -7,6 +7,7 @@ const { execFile } = require('child_process');
 const { Worker } = require('worker_threads');
 const { validateDeletion } = require('../core/safety');
 const { classifyFinderError, emptyTrashDir, finderTrashArgs, chunk } = require('../core/trash');
+const opt = require('../core/optimize');
 
 let win = null;
 let worker = null;
@@ -251,6 +252,120 @@ ipcMain.handle('trash:empty', async () => {
 
 ipcMain.handle('app:openAutomationSettings', async () => {
   if (IS_MAC) await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation');
+  return true;
+});
+
+// ---------- 최적화 ----------
+// 명령을 실행해 결과 글자를 돌려준다. 실패하면 빈 글자 (없는 명령이거나 권한이 없는 경우).
+function run(cmd, args, timeout = 15000) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (err, out) => resolve(err ? '' : String(out)));
+  });
+}
+let lastProcs = new Map();   // 이름 → 마지막으로 보여준 프로그램 (종료 요청 검증용)
+let lastStartup = new Map(); // id → 마지막으로 보여준 자동 실행 항목
+
+ipcMain.handle('opt:health', async () => {
+  let disk = null;
+  try { const s = await fsp.statfs(HOME); disk = { total: s.blocks * s.bsize, free: s.bavail * s.bsize }; } catch { /* 없음 */ }
+  let memFreePct = Math.round((os.freemem() / os.totalmem()) * 100);
+  let swapUsed = null;
+  let battery = null;
+  if (IS_MAC) {
+    // 맥은 남는 메모리를 일부러 캐시로 채우므로, 맥이 직접 계산한 '여유 비율'을 쓴다
+    const [mp, sw, bat] = await Promise.all([
+      run('/usr/bin/memory_pressure', []), run('/usr/sbin/sysctl', ['vm.swapusage']),
+      run('/usr/sbin/system_profiler', ['SPPowerDataType', '-json'], 20000),
+    ]);
+    const pct = opt.parseMemoryFree(mp);
+    if (pct != null) memFreePct = pct;
+    swapUsed = opt.parseSwapUsed(sw);
+    battery = opt.parseBattery(bat);
+  }
+  return opt.healthChecks({ disk, uptimeSec: os.uptime(), memFreePct, swapUsed, battery });
+});
+
+ipcMain.handle('opt:processes', async () => {
+  const out = await run('/bin/ps', ['-Aeo', 'pid,user,pcpu,rss,comm']);
+  const groups = opt.parsePs(out, os.userInfo().username).filter((g) => !g.pids.includes(process.pid));
+  lastProcs = new Map(groups.map((g) => [g.name, g]));
+  const cores = os.cpus().length || 1;
+  return { cores, totalMem: os.totalmem(), items: groups };
+});
+
+// 앱에게 "종료해 주세요"라고 정중히 요청한다. 저장 안 한 문서가 있으면 앱이 직접 물어본다. (강제 종료는 하지 않는다)
+ipcMain.handle('opt:quit', async (_e, name) => {
+  const g = lastProcs.get(name);
+  if (!g || !g.canQuit) return { ok: false, reason: '종료할 수 없는 프로그램이에요' };
+  if (!IS_MAC) return { ok: false, reason: '맥에서만 쓸 수 있어요' };
+  const script = ['on run argv', 'tell application (item 1 of argv) to quit', 'end run'];
+  return new Promise((resolve) => {
+    execFile('/usr/bin/osascript', [...script.flatMap((l) => ['-e', l]), '--', g.name], { timeout: 20000 }, (err, _o, stderr) => {
+      if (!err) return resolve({ ok: true });
+      const why = classifyFinderError(err, String(stderr || ''));
+      resolve({ ok: false, why, reason: why === 'automation' ? '말끔이 다른 앱에 요청하도록 허용되어 있지 않아요' : '앱이 응답하지 않았어요' });
+    });
+  });
+});
+
+async function readPlist(file) {
+  if (IS_MAC) {
+    // 맥의 plist는 사람이 읽을 수 없는 형식일 수 있어 plutil로 바꿔 읽는다
+    const json = await run('/usr/bin/plutil', ['-convert', 'json', '-o', '-', file]);
+    if (json) { try { return JSON.parse(json); } catch { /* 아래 방법으로 */ } }
+  }
+  return opt.parsePlistXml(await fsp.readFile(file, 'utf8'));
+}
+
+ipcMain.handle('opt:startup', async () => {
+  const items = [];
+  if (IS_MAC) {
+    // 로그인 항목: 맥을 켜면 함께 열리는 앱
+    const script = ['tell application "System Events"', 'set out to ""', 'repeat with li in login items',
+      'set out to out & (name of li) & "\t" & (path of li) & "\n"', 'end repeat', 'return out', 'end tell'];
+    const out = await run('/usr/bin/osascript', script.flatMap((l) => ['-e', l]), 20000);
+    for (const line of out.split('\n')) {
+      const [name, p] = line.split('\t');
+      if (name && name.trim()) items.push({ id: 'login:' + name.trim(), kind: 'login', scope: 'user', name: name.trim(), detail: (p || '').trim().replace(/^\/Users\/[^/]+/, '~') });
+    }
+  }
+  items.push(...await opt.listLaunchItems(path.join(HOME, 'Library', 'LaunchAgents'), readPlist, 'user'));
+  if (IS_MAC) {
+    items.push(...await opt.listLaunchItems('/Library/LaunchAgents', readPlist, 'system'));
+    items.push(...await opt.listLaunchItems('/Library/LaunchDaemons', readPlist, 'system'));
+  }
+  lastStartup = new Map(items.map((i) => [i.id, i]));
+  return items;
+});
+
+// 자동 실행 끄기. 설정 파일을 휴지통으로 옮기므로, 다시 켜려면 휴지통에서 꺼내면 된다.
+ipcMain.handle('opt:disable', async (_e, id) => {
+  const it = lastStartup.get(id);
+  if (!it || it.scope !== 'user') return { ok: false, reason: '여기서 끌 수 없는 항목이에요' };
+  if (it.kind === 'login') {
+    if (!IS_MAC) return { ok: false, reason: '맥에서만 쓸 수 있어요' };
+    const script = ['on run argv', 'tell application "System Events" to delete login item (item 1 of argv)', 'end run'];
+    return new Promise((resolve) => {
+      execFile('/usr/bin/osascript', [...script.flatMap((l) => ['-e', l]), '--', it.name], { timeout: 20000 }, (err) => {
+        if (!err) lastStartup.delete(id);
+        resolve(err ? { ok: false, reason: '로그인 항목을 지우지 못했어요. 시스템 설정에서 꺼 주세요.' } : { ok: true });
+      });
+    });
+  }
+  const dir = path.join(HOME, 'Library', 'LaunchAgents');
+  if (path.dirname(it.path) !== dir || !it.path.endsWith('.plist')) return { ok: false, reason: '여기서 끌 수 없는 항목이에요' };
+  if (IS_MAC) await run('/bin/launchctl', ['bootout', `gui/${os.userInfo().uid}`, it.path]); // 지금 실행 중이면 멈춘다
+  try {
+    await shell.trashItem(it.path);
+    lastStartup.delete(id);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: `설정 파일을 휴지통으로 옮기지 못했어요 (${String((e && e.message) || '').slice(0, 100)})` };
+  }
+});
+
+ipcMain.handle('opt:openLoginSettings', async () => {
+  if (IS_MAC) await shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
   return true;
 });
 

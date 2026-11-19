@@ -180,6 +180,47 @@ test('휴지통 비우기: 실패 원인을 가려내고, 휴지통 폴더만 �
   assert.strictEqual(r2.ok, false);
 });
 
+test('최적화: 맥이 알려준 정보를 올바르게 읽는다', async () => {
+  const o = require('../src/core/optimize');
+  const ps = `  PID USER   %CPU    RSS COMM
+  101 me     42.5 512000 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  102 me     10.0 256000 /Applications/Google Chrome.app/Contents/Frameworks/X/Google Chrome Helper (Renderer)
+  103 root    5.0 100000 /System/Library/CoreServices/WindowServer
+  104 me      1.0  50000 /usr/bin/python3`;
+  const g = o.parsePs(ps, 'me');
+  const chrome = g.find((x) => x.name === 'Google Chrome');
+  assert.strictEqual(chrome.cpu, 52.5);
+  assert.strictEqual(chrome.count, 2);
+  assert.strictEqual(chrome.canQuit, true);
+  assert.strictEqual(g.find((x) => x.name === 'WindowServer').canQuit, false, '시스템 프로그램은 종료 불가');
+  assert.strictEqual(g.find((x) => x.name === 'python3').canQuit, false, '앱이 아닌 것은 종료 버튼 없음');
+
+  const bat = o.parseBattery(JSON.stringify({ SPPowerDataType: [{ sppower_battery_health_info: { sppower_battery_cycle_count: 412, sppower_battery_health: 'Good', sppower_battery_health_maximum_capacity: '87%' } }] }));
+  assert.deepStrictEqual(bat, { cycles: 412, condition: 'Good', capacity: 87 });
+  assert.strictEqual(o.parseBattery('{"SPPowerDataType":[{}]}'), null);
+  assert.strictEqual(o.parseMemoryFree('System-wide memory free percentage: 23%'), 23);
+  assert.strictEqual(o.parseSwapUsed('vm.swapusage: total = 4096.00M  used = 2048.00M  free = 2048.00M'), 2048 * 1024 * 1024);
+
+  const checks = o.healthChecks({ disk: { total: 100, free: 5 }, uptimeSec: 20 * 86400, memFreePct: 12, swapUsed: 0, battery: { cycles: 900, condition: 'Service Recommended', capacity: 71 } });
+  assert.deepStrictEqual(checks.map((c) => `${c.id}:${c.status}`), ['disk:bad', 'memory:bad', 'uptime:warn', 'battery:warn']);
+  const fine = o.healthChecks({ disk: { total: 100, free: 60 }, uptimeSec: 3600, memFreePct: 70, swapUsed: 0, battery: null });
+  assert.ok(fine.every((c) => c.status === 'good'));
+
+  // 자동 실행 항목: 애플 기본 항목과 꺼진 항목은 빼고 읽는다
+  const fs2 = require('fs');
+  const dir = path.join(home, 'Library/LaunchAgents');
+  const plist = (label, extra = '') => `<?xml version="1.0"?><plist><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array><string>/Applications/Example Updater.app/Contents/MacOS/updater</string></array><key>RunAtLoad</key><true/>${extra}</dict></plist>`;
+  fs2.mkdirSync(dir, { recursive: true });
+  fs2.writeFileSync(path.join(dir, 'com.apple.thing.plist'), plist('com.apple.thing'));
+  fs2.writeFileSync(path.join(dir, 'com.off.agent.plist'), plist('com.off.agent', '<key>Disabled</key><true/>'));
+  const read = async (f) => o.parsePlistXml(fs2.readFileSync(f, 'utf8'));
+  const items = await o.listLaunchItems(dir, read, 'user');
+  assert.deepStrictEqual(items.map((i) => i.label), ['com.example.updater']);
+  assert.strictEqual(items[0].name, 'Example Updater');
+  assert.strictEqual(o.friendlyName('com.google.keystone.agent', ''), 'Google Keystone');
+  fs2.rmSync(path.join(dir, 'com.apple.thing.plist')); fs2.rmSync(path.join(dir, 'com.off.agent.plist'));
+});
+
 test('폴더 크기 계산', async () => {
   const { size } = await dirSize(path.join(home, 'Library/Caches/com.example.app'));
   assert.strictEqual(size, 2 * MB);

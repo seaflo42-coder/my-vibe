@@ -349,6 +349,23 @@ input[type="checkbox"]:active { transform: scale(.9); }
 .row .chip { flex: none; font: var(--t-micro); font-weight: 500; color: var(--label2); background: var(--lift); padding: 3px 8px; border-radius: 6px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .group .row { min-height: 48px; }
 
+/* ---------- 최적화 ---------- */
+.state { display: inline-flex; align-items: center; gap: 5px; font: var(--t-micro); padding: 3px 8px; border-radius: 99px; white-space: nowrap; }
+.state i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.state.good { color: #7ee79a; background: rgba(50,215,75,.16); }
+.state.warn { color: #ffc266; background: rgba(255,159,10,.16); }
+.state.bad { color: #ff8a82; background: rgba(255,69,58,.18); }
+.chipq { font: var(--t-micro); font-weight: 500; color: var(--label2); background: var(--lift); padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.meter { height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin-top: 7px; max-width: 420px; }
+.meter i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transform-origin: left; transition: transform .6s var(--ease); }
+.meter i.hot { background: var(--orange); }
+.cell .v.two { display: grid; justify-items: end; line-height: 1.25; min-width: 64px; }
+.cell .v.two b { font: var(--t-headline); color: var(--label); }
+.cell .v.two span { font: var(--t-caption); }
+.cell .hint { font: var(--t-caption); color: var(--label3); min-width: 44px; text-align: right; }
+.procs .cell .btn, .startup .cell .btn { min-width: 52px; }
+.nav-item { width: 62px; }
+
 /* ---------- 살펴보기: 계층 · 갤러리 ---------- */
 main.fill { overflow: hidden; padding-bottom: 90px; -webkit-mask-image: none; mask-image: none; }
 .wrap.fill { height: 100%; max-width: none; display: flex; flex-direction: column; min-height: 0; }

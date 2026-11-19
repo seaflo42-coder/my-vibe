@@ -125,6 +125,24 @@ const { makeHome } = require('./fixture');
     assert.ok(fs.existsSync(path.join(home, 'Library/Preferences/keep.plist')));
     await page.click('.nav-item:has-text("중복 파일")');
     assert.strictEqual(await page.locator('.group').count(), 0);
+    // 최적화 탭: 맥 상태, 무거운 프로그램, 자동 실행 항목
+    await page.click('.nav-item:has-text("최적화")');
+    await page.waitForSelector('.health .cell', { timeout: 20000 });
+    assert.ok(await page.locator('.health .cell').count() >= 2, '상태 점검 항목이 보여야 함');
+    await page.waitForSelector('.procs .cell');
+    assert.ok(await page.locator('.procs .cell').count() >= 1, '무거운 프로그램 목록이 보여야 함');
+    await page.waitForSelector('.startup .cell:has-text("Example Updater")');
+    await page.waitForTimeout(700);
+    await shot('7-optimize');
+    await page.evaluate(() => { const m = document.getElementById('main'); m.scrollTop = m.scrollHeight; });
+    await page.waitForTimeout(300);
+    await shot('7b-optimize-startup');
+    // 자동 실행 끄기 → 설정 파일이 휴지통으로 가고 목록에서 사라진다
+    await page.click('.startup .cell:has-text("Example Updater") >> text=끄기');
+    await page.click('.modal .btn.primary');
+    await page.waitForSelector('.toast:has-text("자동 실행을 껐어요")', { timeout: 20000 });
+    assert.ok(!fs.existsSync(path.join(home, 'Library/LaunchAgents/com.example.updater.plist')), '설정 파일이 옮겨져야 함');
+    assert.strictEqual(await page.locator('.startup .cell:has-text("Example Updater")').count(), 0);
     assert.deepStrictEqual(errors, []);
     console.log('UI 확인 통과');
   } finally {

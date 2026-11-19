@@ -51,6 +51,9 @@ function makeHome() {
   write(path.join(home, 'Library/Logs/app.log'), crypto.randomBytes(2 * MB));
   write(path.join(home, 'Library/Preferences/keep.plist'), a);
   write(path.join(home, '.Trash/junk.bin'), crypto.randomBytes(1 * MB));
+  // 맥을 켤 때 자동으로 실행되는 항목 (최적화 탭 확인용)
+  write(path.join(home, 'Library/LaunchAgents/com.example.updater.plist'),
+    '<?xml version="1.0"?><plist><dict><key>Label</key><string>com.example.updater</string><key>ProgramArguments</key><array><string>/Applications/Example Updater.app/Contents/MacOS/updater</string></array><key>RunAtLoad</key><true/></dict></plist>');
   write(path.join(home, 'Movies/big.mov'), crypto.randomBytes(101 * MB));
   return home;
 }

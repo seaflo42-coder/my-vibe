@@ -350,7 +350,7 @@
     $('main').scrollTop = 0;
   }
   function renderSide() {
-    const items = [['home', '저장공간', 'disk'], ['dups', '중복 파일', 'copy'], ['reco', '정리 추천', 'spark']];
+    const items = [['home', '저장공간', 'disk'], ['dups', '중복 파일', 'copy'], ['reco', '정리 추천', 'spark'], ['opt', '최적화', 'gauge']];
     $('nav').replaceChildren(...items.map(([id, label, ic]) =>
       h('button', { class: 'nav-item', 'aria-current': S.view === id ? 'page' : null, onclick: () => go(id) },
         icon(ic), h('span', { class: 'label' }, label))));
@@ -373,6 +373,9 @@
       kids.push(h('h1', {}, '저장공간'), h('span', { class: 'grow' }), stepper());
       if (S.scanning) kids.push(h('button', { class: 'btn', onclick: cancelScan }, icon('stop'), '검사 중단'));
       else if (r) kids.push(h('button', { class: 'btn', id: 'scanBtn', onclick: startScan }, icon('again'), '다시 검사'));
+    } else if (S.view === 'opt') {
+      kids.push(h('h1', {}, '최적화'), h('span', { class: 'grow' }),
+        h('button', { class: 'btn', onclick: () => { O.health = null; O.startup = null; renderMain(); loadOptimize(true); } }, icon('again'), '다시 확인'));
     } else {
       const dups = S.view === 'dups';
       kids.push(h('h1', {}, dups ? '중복 파일' : '정리 추천'));
@@ -971,7 +974,7 @@
     }
     return S.mode === 'columns' ? viewColumns(secs, kind) : S.mode === 'gallery' ? viewGallery(secs, kind) : viewList(secs, kind);
   }
-  const browsing = () => S.view !== 'home' && !!S.result && !S.scanning;
+  const browsing = () => (S.view === 'dups' || S.view === 'reco') && !!S.result && !S.scanning;
 
   // ---------- 검색 · 보기 방식 ----------
   function setQuery(v) {
@@ -1037,6 +1040,114 @@
     if (handled) e.preventDefault();
   });
 
+  // ---------- 최적화: 맥 상태 · 무거운 프로그램 · 자동 실행 ----------
+  const O = { health: null, procs: null, startup: null, sort: 'cpu', loading: false, timer: null };
+  async function loadOptimize(all) {
+    if (O.loading) return;
+    O.loading = true;
+    try {
+      const jobs = [api.optProcesses().then((v) => { O.procs = v; })];
+      if (all || !O.health) jobs.push(api.optHealth().then((v) => { O.health = v; }));
+      if (all || !O.startup) jobs.push(api.optStartup().then((v) => { O.startup = v; }));
+      await Promise.all(jobs.map((j) => j.catch(() => {})));
+    } finally { O.loading = false; }
+    if (S.view === 'opt') renderMain();
+  }
+  // 최적화 탭을 보고 있는 동안에만 무거운 프로그램 목록을 5초마다 새로 읽는다
+  function watchOptimize() {
+    const on = S.view === 'opt';
+    if (on && !O.timer) { loadOptimize(false); O.timer = setInterval(() => { if (!document.querySelector('.overlay')) loadOptimize(false); }, 5000); }
+    if (!on && O.timer) { clearInterval(O.timer); O.timer = null; }
+  }
+  const HEALTH_ICON = { disk: 'disk', memory: 'memory', uptime: 'timer', battery: 'battery' };
+  const STATUS_WORD = { good: '좋음', warn: '살펴보기', bad: '조치 필요' };
+  async function quitApp(g) {
+    const ok = await modal({
+      glyph: 'power', title: `${g.name}을(를) 종료할까요?`,
+      body: '앱에 종료를 요청해요. 저장하지 않은 작업이 있으면 앱이 먼저 물어봐요.',
+      confirm: '종료 요청',
+    });
+    if (!ok) return;
+    const res = await api.optQuit(g.name);
+    if (res.ok) { toast(`${g.name}에 종료를 요청했어요.`); setTimeout(() => loadOptimize(false), 1500); } else toast(res.reason || '종료하지 못했어요.');
+  }
+  async function disableStartup(it) {
+    const ok = await modal({
+      glyph: 'power', title: `${it.name}의 자동 실행을 끌까요?`,
+      body: it.kind === 'login' ? '맥을 켤 때 이 앱이 함께 열리지 않게 돼요. 앱 자체는 지워지지 않아요.'
+        : '맥을 켤 때 이 프로그램이 뒤에서 실행되지 않게 돼요. 설정 파일을 휴지통으로 옮기므로, 문제가 생기면 휴지통에서 되돌릴 수 있어요.',
+      confirm: '자동 실행 끄기',
+    });
+    if (!ok) return;
+    const res = await api.optDisable(it.id);
+    if (res.ok) { O.startup = O.startup.filter((x) => x.id !== it.id); toast(`${it.name}의 자동 실행을 껐어요.`); renderMain(); } else toast(res.reason || '끄지 못했어요.', { label: '설정 열기', run: () => api.openLoginSettings() });
+  }
+  function viewOptimize() {
+    const out = [h('p', { class: 'lead' }, '맥이 느려지는 흔한 원인 세 가지를 살펴봐요. 여기서는 파일을 지우지 않아요.')];
+
+    // 1) 맥 상태
+    out.push(h('div', { class: 'caption' }, '맥 상태'));
+    if (!O.health) out.push(h('div', { class: 'box' }, [0, 1, 2].map(() => h('div', { class: 'skel' }, h('i'), h('i'), h('i')))));
+    else {
+      out.push(h('div', { class: 'box health' }, O.health.map((c) => h('div', { class: 'cell tiled' },
+        h('span', { class: 'tile ghost' }, icon(HEALTH_ICON[c.id] || 'gauge')),
+        h('div', { class: 'text' },
+          h('div', { class: 't' }, c.title, h('span', { class: 'state ' + c.status }, h('i'), STATUS_WORD[c.status])),
+          h('div', { class: 'd wrap' }, c.advice)),
+        h('span', { class: 'v num' }, c.value),
+        c.action === 'goHome' && h('button', { class: 'btn small', onclick: () => go('home') }, '정리하러 가기')))));
+    }
+
+    // 2) 지금 무거운 프로그램
+    out.push(h('div', { class: 'caption' }, '지금 무거운 프로그램',
+      h('span', { class: 'side' }, '5초마다 새로 확인해요')));
+    if (!O.procs) out.push(h('div', { class: 'box' }, [0, 1, 2].map(() => h('div', { class: 'skel' }, h('i'), h('i'), h('i')))));
+    else {
+      const by = O.sort === 'mem' ? (a, b) => b.mem - a.mem : (a, b) => b.cpu - a.cpu;
+      // 아무것도 쓰지 않는 항목(시스템 내부 작업 등)은 목록에서 뺀다
+      const top = O.procs.items.filter((g) => g.mem > 0 || g.cpu > 0.5).sort(by).slice(0, 6);
+      const maxCpu = O.procs.cores * 100;
+      out.push(h('div', { class: 'box procs' },
+        h('div', { class: 'cat-tools' },
+          h('span', {}, '많이 쓰는 순서'),
+          h('div', { class: 'seg' }, [['cpu', '처리 장치(CPU)'], ['mem', '메모리']].map(([v, l]) =>
+            h('button', { 'aria-pressed': String(O.sort === v), onclick: () => { O.sort = v; renderMain(); } }, l))),
+          h('span', { class: 'grow' })),
+        top.map((g) => {
+          const share = O.sort === 'mem' ? g.mem / O.procs.totalMem : g.cpu / maxCpu;
+          return h('div', { class: 'cell tiled' },
+            h('span', { class: 'tile ghost' }, icon(g.isApp ? 'gauge' : 'cpu')),
+            h('div', { class: 'text' },
+              h('div', { class: 't' }, g.name, g.count > 1 && h('span', { class: 'chipq num' }, `${g.count}개`)),
+              h('div', { class: 'meter' }, h('i', { class: share > 0.5 ? 'hot' : '', style: `transform:scaleX(${Math.min(1, Math.max(0.01, share))})` }))),
+            h('span', { class: 'v num two' }, h('b', {}, `${g.cpu.toFixed(0)}%`), h('span', {}, fmt(g.mem))),
+            g.canQuit ? h('button', { class: 'btn small', onclick: () => quitApp(g) }, '종료')
+              : h('span', { class: 'hint' }, g.mine ? '' : '시스템'));
+        })));
+      out.push(h('p', { class: 'foot' }, '맥이 꼭 필요로 하는 시스템 프로그램에는 종료 버튼이 없어요. 종료는 앱에 정중히 요청하는 방식이라 저장하지 않은 작업은 앱이 먼저 물어봐요.'));
+    }
+
+    // 3) 자동 실행
+    out.push(h('div', { class: 'caption' }, '맥을 켤 때 자동으로 실행',
+      h('button', { class: 'btn small plain', onclick: () => api.openLoginSettings() }, icon('settings'), '시스템 설정에서 보기')));
+    if (!O.startup) out.push(h('div', { class: 'box' }, [0, 1].map(() => h('div', { class: 'skel' }, h('i'), h('i'), h('i')))));
+    else if (!O.startup.length) {
+      out.push(h('div', { class: 'box' }, h('div', { class: 'cell' }, h('div', { class: 'text' },
+        h('div', { class: 't' }, '자동으로 실행되는 항목을 찾지 못했어요'),
+        h('div', { class: 'd wrap' }, '앱이 직접 등록한 항목은 시스템 설정 → 일반 → 로그인 항목에서도 확인할 수 있어요.')))));
+    } else {
+      out.push(h('div', { class: 'box startup' }, O.startup.map((it) => h('div', { class: 'cell tiled' },
+        h('span', { class: 'tile ghost' }, icon('power')),
+        h('div', { class: 'text' },
+          h('div', { class: 't' }, it.name, h('span', { class: 'chipq' }, it.kind === 'login' ? '로그인할 때 열림' : it.scope === 'system' ? '뒤에서 실행 · 시스템 전체' : '뒤에서 실행')),
+          h('div', { class: 'd', title: it.detail }, it.detail)),
+        it.scope === 'user' ? h('button', { class: 'btn small', onclick: () => disableStartup(it) }, '끄기')
+          : h('button', { class: 'btn small plain', onclick: () => api.openLoginSettings() }, '설정에서 끄기')))));
+      out.push(h('p', { class: 'foot' }, '무엇인지 모르는 항목은 그대로 두는 편이 안전해요. 시스템 전체에 설치된 항목은 맥 보안 때문에 시스템 설정에서만 끌 수 있어요.'));
+    }
+    return out;
+  }
+
   // ---------- 그리기: 전체 ----------
   function renderMain() {
     const main = $('main');
@@ -1044,7 +1155,8 @@
     const scrolls = {};
     for (const el of main.querySelectorAll('[data-scroll]')) scrolls[el.dataset.scroll] = [el.scrollTop, el.scrollLeft];
     NAV = null;
-    const kids = S.view === 'home' ? viewHome() : viewBrowse(S.view);
+    const kids = S.view === 'home' ? viewHome() : S.view === 'opt' ? viewOptimize() : viewBrowse(S.view);
+    watchOptimize();
     const fill = browsing() && S.mode !== 'list' && !!NAV; // 계층 · 갤러리는 칸마다 따로 스크롤한다
     main.classList.toggle('fill', fill);
     main.replaceChildren(h('div', { class: 'wrap' + (S.animate ? ' fresh' : '') + (fill ? ' fill' : '') }, kids));
