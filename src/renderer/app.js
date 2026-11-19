@@ -411,6 +411,64 @@
     p.free = d.free;
     return p;
   }
+  /** 면적 지도 배치(squarified treemap): 값에 비례하는 넓이의 사각형으로 가로 W, 세로 H 영역을 채운다. */
+  function squarify(items, W, H) {
+    const total = items.reduce((n, i) => n + i.v, 0);
+    if (!total) return [];
+    const area = items.map((i) => (i.v / total) * W * H);
+    const out = [];
+    let x = 0; let y = 0; let w = W; let hh = H; let row = [];
+    const sum = (r) => r.reduce((n, k) => n + area[k], 0);
+    const worst = (r, side) => {
+      const sm = sum(r); const mx = Math.max(...r.map((k) => area[k])); const mn = Math.min(...r.map((k) => area[k]));
+      return Math.max((side * side * mx) / (sm * sm), (sm * sm) / (side * side * mn));
+    };
+    const flush = () => {
+      const sm = sum(row);
+      if (w >= hh) {
+        const cw = sm / hh; let cy = y;
+        for (const k of row) { const rh = area[k] / cw; out.push({ item: items[k], x, y: cy, w: cw, h: rh }); cy += rh; }
+        x += cw; w -= cw;
+      } else {
+        const rh = sm / w; let cx = x;
+        for (const k of row) { const cw = area[k] / rh; out.push({ item: items[k], x: cx, y, w: cw, h: rh }); cx += cw; }
+        y += rh; hh -= rh;
+      }
+      row = [];
+    };
+    for (let k = 0; k < items.length; k++) {
+      const side = Math.min(w, hh);
+      if (row.length && worst([...row, k], side) > worst(row, side)) flush();
+      row.push(k);
+    }
+    if (row.length) flush();
+    return out;
+  }
+  function storageMap() {
+    const r = S.scanning ? null : S.result;
+    if (!r) return null;
+    const items = [];
+    if (r.groups.length) items.push({ id: 'dups', title: '중복 파일', size: r.summary.dupWasted, tone: 'dup', run: () => go('dups') });
+    for (const c of r.categories) {
+      if (c.total > 0) items.push({ id: c.id, title: c.title.replace(/ \(.*\)$/, ''), size: c.total, tone: c.id === 'trash' ? 'trash' : c.safety, run: () => go('reco', c.id) });
+    }
+    if (!items.length) return null;
+    items.sort((a, b) => b.size - a.size);
+    const total = items.reduce((n, i) => n + i.size, 0);
+    // 아주 작은 항목도 눌러 볼 수 있게 최소 넓이를 보장한다 (글자로 적힌 용량은 실제 값 그대로)
+    for (const i of items) i.v = Math.max(i.size, total * 0.03);
+    const W = 100; const H = 22; // 가로로 긴 영역 (화면에서는 % 로 배치)
+    const rects = squarify(items, W, H);
+    return h('div', { class: 'tmwrap' },
+      h('div', { class: 'tmcap' }, h('b', { class: 'num' }, `정리할 수 있는 ${fmt(parts().gain)}`), '를 확대한 지도예요. 블록이 클수록 용량이 커요.'),
+      h('div', { class: 'treemap', role: 'list', 'aria-label': '정리할 수 있는 항목 지도' }, rects.map((q) => {
+        const small = q.w < 11 || q.h < 9;
+        return h('button', {
+          class: `tm ${q.item.tone}${small ? ' sm' : ''}`, role: 'listitem', title: `${q.item.title} · ${fmt(q.item.size)}`,
+          style: `left:${q.x}%;top:${(q.y / H) * 100}%;width:${q.w}%;height:${(q.h / H) * 100}%`, onclick: q.item.run,
+        }, h('span', { class: 'tm-in' }, h('span', { class: 'tm-t' }, q.item.title), h('span', { class: 'tm-v num' }, fmt(q.item.size))));
+      })));
+  }
   function storageBox(extra) {
     const d = S.disk;
     const p = parts();
@@ -424,14 +482,17 @@
           freePct < 0.1 && h('span', { class: 'tag low' }, '공간이 많이 부족해요'),
           freePct >= 0.1 && freePct < 0.2 && h('span', { class: 'tag review' }, '공간이 줄어들고 있어요'),
           h('span', { class: 'cap num' }, `이 Mac · 전체 ${fmt(d.total)}`)),
-        h('div', { class: 'sbar', role: 'img', 'aria-label': `전체 ${fmt(d.total)} 중 ${fmt(d.free)} 사용 가능` },
+        // 디스크 전체는 실제 비율 그대로 가늘게 보여주고,
+        h('div', { class: 'sbar slim', role: 'img', 'aria-label': `전체 ${fmt(d.total)} 중 ${fmt(d.free)} 사용 가능` },
           seg('used'), seg('dup'), seg('safe'), seg('review'), h('i', { class: 's-free', style: `flex:${Math.max(p.free, 1)} 1 0` })),
         h('div', { class: 'legend num' },
           h('span', { class: 'k-used' }, h('i'), `사용 중 ${fmt(p.used)}`),
           p.dup > 0 && h('span', { class: 'k-dup' }, h('i'), `중복 파일 ${fmt(p.dup)}`),
           p.safe > 0 && h('span', { class: 'k-safe' }, h('i'), `지워도 안전 ${fmt(p.safe)}`),
           p.review > 0 && h('span', { class: 'k-review' }, h('i'), `확인 후 삭제 ${fmt(p.review)}`),
-          h('span', {}, h('i'), `사용 가능 ${fmt(p.free)}`))),
+          h('span', {}, h('i'), `사용 가능 ${fmt(p.free)}`)),
+        // 정리할 수 있는 부분만 따로 크게 펼쳐 보여준다
+        storageMap()),
       extra);
   }
   function navCell(x) {
@@ -506,6 +567,12 @@
           h('div', { class: 'text' }, h('div', { class: 't' }, '휴지통'), h('div', { class: 'd' }, '이미 버린 파일들이에요. 비워야 실제로 공간이 생겨요.')),
           h('span', { class: 'v num' }, trash.unknownSize ? '' : fmt(trash.total)),
           h('button', { class: 'btn small', onclick: emptyTrash }, '비우기…'))));
+      }
+      if (p.gain > 0) {
+        out.push(h('div', { class: 'totalrow' },
+          h('span', { class: 'tl' }, '합계'),
+          h('span', { class: 'tn' }, '서로 겹치는 항목이 있을 수 있어 최대치로 보여드려요'),
+          h('span', { class: 'tv num' }, '최대 ', h('b', {}, fmt(p.gain)))));
       }
       if (r.summary.denied.length) {
         out.push(h('div', { class: 'banner' }, icon('lock'),
@@ -652,7 +719,7 @@
             date: Math.max(...g.files.map((f) => f.mtimeMs || 0)),
             sub: `똑같은 파일 ${g.files.length}개 · 각 ${fmt(g.size)}`,
             // 중복에서는 "어디에 있느냐"가 판단 기준이므로 위치를 제목으로 쓴다
-            items: g.files.map((f) => { const s = split(f.path); return { ...f, label: s.dir, sub: s.name === keepName ? '같은 이름' : s.name, name: s.name, dir: s.dir, kind: fileKind, keep: f.path === g.keep }; })
+            items: g.files.map((f) => { const s = split(f.path); const cut = s.dir.lastIndexOf('/') + 1; return { ...f, label: s.dir, pre: s.dir.slice(0, cut), leaf: s.dir.slice(cut), sub: s.name === keepName ? '같은 이름' : s.name, name: s.name, dir: s.dir, kind: fileKind, keep: f.path === g.keep }; })
               .sort(S.sort.key === 'date' ? byItem : (x, y) => ko.compare(x.label, y.label)),
           };
         })
@@ -769,11 +836,18 @@
     }
     return out;
   }
+  /** 이름 칸. 중복 묶음에서는 경로를 한 줄로 쓰고 서로 다른 부분(마지막 폴더)만 진하게 한다. */
+  function nameCell(sec, it) {
+    if (!sec.group) return h('div', { class: 'file' }, h('div', { class: 'name', title: it.path }, it.label), h('div', { class: 'dir' }, it.sub));
+    return h('div', { class: 'file one' },
+      h('span', { class: 'name', title: it.path }, h('span', { class: 'pre' }, it.pre), it.leaf),
+      h('span', { class: 'chip' }, it.sub));
+  }
   function fileRow(sec, it, on, showThumb) {
     return h('label', { class: 'row' + (on ? ' picked' : ''), ondblclick: (e) => { e.preventDefault(); preview(it.path); } },
       checkbox(sec, it, on),
       showThumb && thumb(it.path, it.isDir),
-      h('div', { class: 'file' }, h('div', { class: 'name', title: it.path }, it.label), h('div', { class: 'dir' }, it.sub)),
+      nameCell(sec, it),
       keepBadge(it, on),
       h('span', { class: 'acts' }, !it.isDir && iconBtn('eye', '미리보기', () => preview(it.path)), iconBtn('finder', 'Finder에서 보기', () => api.reveal(it.path))),
       h('span', { class: 'kind' }, it.kind),
@@ -839,7 +913,8 @@
           col2.append(h('div', { class: 'crow' + (on ? ' picked' : ''), role: 'option', 'aria-selected': String(i === it), onclick: () => pick(kind, sec.id, i.path), ondblclick: () => preview(i.path) },
             checkbox(sec, i, on),
             !sec.group && thumb(i.path, i.isDir),
-            h('div', { class: 'text' }, h('div', { class: 'name', title: i.path }, i.label), h('div', { class: 'dir' }, i.sub)),
+            sec.group ? h('div', { class: 'text' }, h('div', { class: 'name', title: i.path }, h('span', { class: 'pre' }, i.pre), i.leaf), h('div', { class: 'dir' }, i.sub))
+              : h('div', { class: 'text' }, h('div', { class: 'name', title: i.path }, i.label), h('div', { class: 'dir' }, i.sub)),
             h('span', { class: 'size num' }, fmt(i.size))));
         }
         if (sec.items.length > shown) col2.append(h('div', { class: 'cat-more' }, h('button', { class: 'btn small', onclick: () => { S.catShown['col:' + sec.id] = shown + 300; renderMain(); } }, `${nf.format(sec.items.length - shown)}개 더 보기`)));

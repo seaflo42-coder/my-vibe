@@ -31,6 +31,12 @@ const { makeHome } = require('./fixture');
     await page.waitForSelector('.summary', { timeout: 60000 });
     await page.waitForTimeout(900);
     await shot('2-result');
+    assert.ok(await page.locator('.treemap .tm').count() >= 4, '저장공간 지도에 블록이 있어야 함');
+    assert.match(await page.locator('.totalrow .tv').innerText(), /최대/);
+    await page.evaluate(() => { const m = document.getElementById('main'); m.scrollTop = m.scrollHeight; });
+    await page.waitForTimeout(300);
+    await shot('2b-total');
+    await page.evaluate(() => { document.getElementById('main').scrollTop = 0; });
 
     // 지름길: 안전한 항목 한 번에 고르기 → 중복 사본 3 + 설치 파일 1 + 캐시 1 + 로그 1
     await page.click('#safeBtn');
