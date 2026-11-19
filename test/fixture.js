@@ -51,6 +51,16 @@ function makeHome() {
   write(path.join(home, 'Library/Logs/app.log'), crypto.randomBytes(2 * MB));
   write(path.join(home, 'Library/Preferences/keep.plist'), a);
   write(path.join(home, '.Trash/junk.bin'), crypto.randomBytes(1 * MB));
+  // 앱 탭 확인용: 오래 안 쓴 앱 하나와 그 관련 파일, 그리고 이미 지운 앱이 남긴 파일
+  write(path.join(home, 'Applications/Old Tool.app/Contents/Info.plist'),
+    '<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier</key><string>com.example.oldtool</string><key>CFBundleName</key><string>Old Tool</string></dict></plist>');
+  write(path.join(home, 'Applications/Old Tool.app/Contents/MacOS/oldtool'), crypto.randomBytes(3 * MB));
+  write(path.join(home, 'Library/Application Support/Old Tool/data.db'), crypto.randomBytes(600 * 1000));
+  write(path.join(home, 'Library/Caches/com.example.oldtool/blob'), crypto.randomBytes(300 * 1000));
+  write(path.join(home, 'Library/Preferences/com.example.oldtool.plist'), 'prefs');
+  write(path.join(home, 'Library/Caches/com.gone.ghostapp/blob'), crypto.randomBytes(400 * 1000));
+  write(path.join(home, 'Library/Application Support/com.gone.ghostapp/store'), crypto.randomBytes(500 * 1000));
+  write(path.join(home, 'Library/Preferences/com.gone.ghostapp.plist'), 'prefs');
   // 맥을 켤 때 자동으로 실행되는 항목 (최적화 탭 확인용)
   write(path.join(home, 'Library/LaunchAgents/com.example.updater.plist'),
     '<?xml version="1.0"?><plist><dict><key>Label</key><string>com.example.updater</string><key>ProgramArguments</key><array><string>/Applications/Example Updater.app/Contents/MacOS/updater</string></array><key>RunAtLoad</key><true/></dict></plist>');

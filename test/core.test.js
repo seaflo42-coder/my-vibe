@@ -221,6 +221,38 @@ test('최적화: 맥이 알려준 정보를 올바르게 읽는다', async () =>
   fs2.rmSync(path.join(dir, 'com.apple.thing.plist')); fs2.rmSync(path.join(dir, 'com.off.agent.plist'));
 });
 
+test('앱: 관련 파일은 이름이 정확히 같은 것만, 찌꺼기는 확실한 것만 고른다', async () => {
+  const a = require('../src/core/apps');
+  const fs2 = require('fs');
+  assert.deepStrictEqual(a.parseInfoPlistXml(fs2.readFileSync(path.join(home, 'Applications/Old Tool.app/Contents/Info.plist'), 'utf8')), { id: 'com.example.oldtool', name: 'Old Tool' });
+  assert.strictEqual(a.parseMdlsDate('(null)'), null);
+  assert.strictEqual(a.parseMdlsDate('2026-03-01 10:22:33 +0000'), Date.UTC(2026, 2, 1, 10, 22, 33));
+  assert.ok(a.isBundleIdLike('com.gone.ghostapp') && !a.isBundleIdLike('Google') && !a.isBundleIdLike('keep'));
+
+  const bundles = await a.findAppBundles([path.join(home, 'Applications')]);
+  assert.deepStrictEqual(bundles.map((b) => path.basename(b)).sort(), ['Foo.app', 'Old Tool.app']);
+
+  const app = { id: 'com.example.oldtool', name: 'Old Tool' };
+  const related = a.relatedCandidates(home, app).filter((p) => fs2.existsSync(p)).map((p) => rel(p)).sort();
+  assert.deepStrictEqual(related, ['Library/Application Support/Old Tool', 'Library/Caches/com.example.oldtool', 'Library/Preferences/com.example.oldtool.plist']);
+
+  // 같은 곳에서 만든 앱(com.example.*)이 설치돼 있으면 그쪽 파일은 찌꺼기로 보지 않는다
+  const left = await a.findLeftovers(home, ['com.example.oldtool']);
+  assert.deepStrictEqual([...new Set(left.map((l) => l.id))], ['com.gone.ghostapp']);
+  assert.strictEqual(left.length, 3);
+  assert.ok(!left.some((l) => l.path.includes('com.apple.') || l.path.endsWith('keep.plist')));
+  // 그 앱이 설치돼 있으면 하나도 나오지 않아야 한다
+  assert.deepStrictEqual(await a.findLeftovers(home, ['com.example.oldtool', 'com.gone.other']), []);
+
+  assert.strictEqual(a.isUnused(null), true);
+  assert.strictEqual(a.isUnused(Date.now() - 10 * 86400000), false);
+  assert.strictEqual(a.canRemoveApp(path.join(home, 'Applications/Old Tool.app'), home, app), true);
+  assert.strictEqual(a.canRemoveApp('/Applications/Safari.app', home, { id: 'com.apple.Safari' }), false, '애플 앱은 지우지 않음');
+  assert.strictEqual(a.canRemoveApp('/System/Applications/Mail.app', home, { id: 'x.y.z' }), false);
+  assert.strictEqual(a.canRemoveApp(path.join(home, 'Documents/Thing.app'), home, app), false);
+  assert.strictEqual(a.canRemoveApp('/Applications/Malkkeum.app', home, { id: 'com.seaflo42.malkkeum' }), false, '말끔 자신은 지우지 않음');
+});
+
 test('폴더 크기 계산', async () => {
   const { size } = await dirSize(path.join(home, 'Library/Caches/com.example.app'));
   assert.strictEqual(size, 2 * MB);

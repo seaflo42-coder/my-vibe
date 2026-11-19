@@ -127,7 +127,7 @@
     $('toastRoot').replaceChildren(t);
     setTimeout(() => t.remove(), action ? 10000 : 4000);
   }
-  function modal({ glyph = 'trash', tone = '', title, body, list, stack, confirm, cancel = '취소', danger }) {
+  function modal({ glyph = 'trash', tone = '', title, body, list, stack, confirm, cancel = '취소', danger, extra }) {
     return new Promise((resolve) => {
       const close = (v) => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
       const onKey = (e) => { if (e.key === 'Escape') close(false); };
@@ -138,7 +138,8 @@
           h('h2', {}, title),
           body && h('p', {}, body),
           list && h('ul', { class: stack ? 'stack' : '' }, list.map((r) => h('li', {}, h('span', { class: 'li-t' }, r.title), h('span', { class: 'li-s num' }, r.sub)))),
-          h('div', { class: 'btns' }, cancel && h('button', { class: 'btn', onclick: () => close(false) }, cancel), okBtn)));
+          h('div', { class: 'btns' }, cancel && h('button', { class: 'btn', onclick: () => close(false) }, cancel),
+            extra && h('button', { class: 'btn', onclick: () => close('extra') }, extra), okBtn)));
       document.addEventListener('keydown', onKey);
       $('modalRoot').append(ov);
       okBtn.focus();
@@ -350,7 +351,7 @@
     $('main').scrollTop = 0;
   }
   function renderSide() {
-    const items = [['home', '저장공간', 'disk'], ['dups', '중복 파일', 'copy'], ['reco', '정리 추천', 'spark'], ['opt', '최적화', 'gauge']];
+    const items = [['home', '저장공간', 'disk'], ['dups', '중복 파일', 'copy'], ['reco', '정리 추천', 'spark'], ['apps', '앱', 'apps'], ['opt', '최적화', 'gauge']];
     $('nav').replaceChildren(...items.map(([id, label, ic]) =>
       h('button', { class: 'nav-item', 'aria-current': S.view === id ? 'page' : null, onclick: () => go(id) },
         icon(ic), h('span', { class: 'label' }, label))));
@@ -373,6 +374,9 @@
       kids.push(h('h1', {}, '저장공간'), h('span', { class: 'grow' }), stepper());
       if (S.scanning) kids.push(h('button', { class: 'btn', onclick: cancelScan }, icon('stop'), '검사 중단'));
       else if (r) kids.push(h('button', { class: 'btn', id: 'scanBtn', onclick: startScan }, icon('again'), '다시 검사'));
+    } else if (S.view === 'apps') {
+      kids.push(h('h1', {}, '앱'), h('span', { class: 'grow' }),
+        h('button', { class: 'btn', onclick: () => loadApps(true) }, icon('again'), '다시 확인'));
     } else if (S.view === 'opt') {
       kids.push(h('h1', {}, '최적화'), h('span', { class: 'grow' }),
         h('button', { class: 'btn', onclick: () => { O.health = null; O.startup = null; renderMain(); loadOptimize(true); } }, icon('again'), '다시 확인'));
@@ -1148,6 +1152,158 @@
     return out;
   }
 
+  // ---------- 앱: 안 쓰는 앱 · 지운 앱이 남긴 파일 ----------
+  const A = { apps: null, left: null, filter: 'unused', sort: 'old', picked: new Set(), loading: false, busy: false };
+  async function loadApps(force) {
+    if (A.loading || (A.apps && !force)) return;
+    A.loading = true;
+    if (force) { A.apps = null; A.left = null; A.picked.clear(); renderMain(); }
+    try {
+      A.apps = await api.appsList();
+      if (S.view === 'apps') renderMain();
+      // 크기 재기와 찌꺼기 찾기는 시간이 걸리므로 목록을 먼저 보여주고 뒤이어 채운다
+      const [sizes, left] = await Promise.all([api.appsSizes().catch(() => ({})), api.appsLeftovers().catch(() => [])]);
+      for (const a of A.apps) if (sizes[a.path]) Object.assign(a, sizes[a.path]);
+      A.left = left;
+    } catch { A.apps = A.apps || []; A.left = A.left || []; } finally { A.loading = false; }
+    if (S.view === 'apps') renderMain();
+  }
+  function agoText(ms) {
+    if (ms == null) return '사용 기록 없음';
+    const days = Math.floor((Date.now() - ms) / 86400000);
+    if (days < 1) return '오늘 사용';
+    if (days < 30) return `${days}일 전 사용`;
+    if (days < 365) return `${Math.floor(days / 30)}개월 전 사용`;
+    return `${Math.floor(days / 365)}년 넘게 안 씀`;
+  }
+  function afterTrash(freed, what) {
+    refreshDisk();
+    toast(`${what} 휴지통으로 옮겼어요${freed ? ` (${fmt(freed)})` : ''}. 휴지통을 비우면 공간이 확보돼요.`, { label: '휴지통 비우기', run: emptyTrash });
+  }
+  async function removeApp(a) {
+    if (A.busy) return;
+    const hasRelated = a.related.length > 0;
+    const choice = await modal({
+      glyph: 'trash', title: `${a.name}을(를) 휴지통으로 옮길까요?`,
+      body: hasRelated ? '앱과 함께, 이 앱이 만든 아래 파일도 옮길 수 있어요. 휴지통에서 다시 꺼낼 수 있어요.' : '휴지통에서 다시 꺼낼 수 있어요.',
+      list: hasRelated ? a.related.map((p) => { const s = split(p); return { title: s.name, sub: s.dir }; }) : null, stack: hasRelated,
+      confirm: hasRelated ? '앱과 관련 파일 모두' : '휴지통으로 이동', extra: hasRelated ? '앱만' : null,
+    });
+    if (!choice) return;
+    A.busy = true;
+    let res;
+    try { res = await api.appsTrash(a.path, choice === true && hasRelated); } catch { res = { ok: false, reason: '옮기는 중 문제가 생겼어요.' }; }
+    A.busy = false;
+    if (res.ok) {
+      A.apps = A.apps.filter((x) => x.path !== a.path);
+      renderMain();
+      afterTrash(res.freed, `${a.name}을(를)`);
+    } else if (res.needsPermission) {
+      const open = await modal({ glyph: 'lock', title: '앱을 옮기지 못했어요', body: res.reason, confirm: '권한 설정 열기', cancel: '닫기' });
+      if (open) api.openPrivacySettings();
+    } else toast(res.reason || '옮기지 못했어요.');
+  }
+  async function removeLeftovers() {
+    if (A.busy || !A.picked.size) return;
+    const items = A.left.filter((l) => A.picked.has(l.path));
+    const total = items.reduce((n, l) => n + l.size, 0);
+    const ok = await modal({
+      glyph: 'trash', title: `남은 파일 ${nf.format(items.length)}개, ${fmt(total)}를 휴지통으로 옮길까요?`,
+      body: '지금 설치돼 있지 않은 앱이 남긴 것으로 보이는 파일이에요. 휴지통에서 다시 꺼낼 수 있어요.',
+      confirm: '휴지통으로 이동',
+    });
+    if (!ok) return;
+    A.busy = true;
+    let res;
+    try { res = await api.appsTrashLeftovers(items.map((l) => l.path)); } catch { res = { trashed: [], failed: [], freed: 0 }; }
+    A.busy = false;
+    const gone = new Set(res.trashed);
+    A.left = A.left.filter((l) => !gone.has(l.path));
+    for (const p of gone) A.picked.delete(p);
+    renderMain();
+    if (res.failed.length) {
+      const open = await modal({
+        glyph: 'shield', title: `${nf.format(res.failed.length)}개 항목은 그대로 뒀어요`, list: failedByReason(res.failed), stack: true,
+        confirm: res.needsPermission ? '권한 설정 열기' : '확인', cancel: res.needsPermission ? '닫기' : null,
+      });
+      if (open && res.needsPermission) api.openPrivacySettings();
+    }
+    if (res.trashed.length) afterTrash(res.freed, `남은 파일 ${nf.format(res.trashed.length)}개를`);
+  }
+  function viewApps() {
+    loadApps(false);
+    const out = [h('p', { class: 'lead' }, '오래 열지 않은 앱과, 이미 지운 앱이 남겨 둔 파일을 찾아요. 애플 기본 앱은 목록에 넣지 않아요.')];
+
+    // 1) 설치된 앱
+    if (!A.apps) {
+      out.push(h('div', { class: 'caption' }, '설치된 앱', h('span', { class: 'side' }, '찾는 중이에요')),
+        h('div', { class: 'box' }, [0, 1, 2, 3].map(() => h('div', { class: 'skel' }, h('i'), h('i'), h('i')))));
+      return out;
+    }
+    const unusedCount = A.apps.filter((a) => a.unused).length;
+    const list = (A.filter === 'unused' ? A.apps.filter((a) => a.unused) : [...A.apps])
+      .sort(A.sort === 'size' ? (x, y) => (y.size || 0) - (x.size || 0) : (x, y) => (x.lastUsed || 0) - (y.lastUsed || 0));
+    out.push(h('div', { class: 'caption' }, '설치된 앱'));
+    const box = h('div', { class: 'box applist' },
+      h('div', { class: 'cat-tools' },
+        h('div', { class: 'seg' }, [['unused', `안 쓰는 앱 ${nf.format(unusedCount)}`], ['all', `전체 ${nf.format(A.apps.length)}`]].map(([v, l]) =>
+          h('button', { 'aria-pressed': String(A.filter === v), onclick: () => { A.filter = v; renderMain(); } }, l))),
+        h('span', { class: 'grow' }),
+        h('div', { class: 'seg' }, [['old', '오래 안 쓴 순서'], ['size', '큰 순서']].map(([v, l]) =>
+          h('button', { 'aria-pressed': String(A.sort === v), onclick: () => { A.sort = v; renderMain(); } }, l)))));
+    if (!list.length) {
+      box.append(h('div', { class: 'cell' }, h('div', { class: 'text' },
+        h('div', { class: 't' }, A.filter === 'unused' ? '오래 안 쓴 앱이 없어요' : '앱을 찾지 못했어요'),
+        h('div', { class: 'd wrap' }, A.filter === 'unused' ? '설치된 앱을 모두 최근 6개월 안에 사용했어요.' : '응용 프로그램 폴더에서 지울 수 있는 앱을 찾지 못했어요.'))));
+    }
+    for (const a of list.slice(0, 200)) {
+      box.append(h('div', { class: 'cell tiled', ondblclick: () => api.reveal(a.path) },
+        thumb(a.path, true, 'appicon', 128),
+        h('div', { class: 'text' },
+          h('div', { class: 't' }, a.name, a.unused && h('span', { class: 'tag review' }, a.lastUsed == null ? '사용 기록 없음' : '6개월 넘게 안 씀')),
+          h('div', { class: 'd' }, a.lastUsed == null ? tilde(a.path) : `${agoText(a.lastUsed)} · 마지막 ${fmtDate(a.lastUsed)}`,
+            a.related.length ? ` · 관련 파일 ${a.related.length}개` : '')),
+        h('span', { class: 'v num two' }, h('b', {}, a.size != null ? fmt(a.size) : '…'), a.relatedSize ? h('span', {}, `+ ${fmt(a.relatedSize)}`) : null),
+        iconBtn('finder', 'Finder에서 보기', () => api.reveal(a.path)),
+        h('button', { class: 'btn small', disabled: A.busy, onclick: () => removeApp(a) }, '삭제…')));
+    }
+    out.push(box, h('p', { class: 'foot' }, '맥이 사용 기록을 남기지 않은 앱은 "사용 기록 없음"으로 나와요. 실제로는 쓰는 앱일 수 있으니 이름을 보고 판단하세요. 실행 중인 앱은 지우지 않아요.'));
+
+    // 2) 지운 앱이 남긴 파일
+    const pickedSize = A.left ? A.left.filter((l) => A.picked.has(l.path)).reduce((n, l) => n + l.size, 0) : 0;
+    out.push(h('div', { class: 'caption' }, '지운 앱이 남긴 파일',
+      A.left && A.left.length ? h('span', { class: 'side num' }, `${nf.format(A.left.length)}개 · ${fmt(A.left.reduce((n, l) => n + l.size, 0))}`) : null));
+    if (!A.left) out.push(h('div', { class: 'box' }, [0, 1].map(() => h('div', { class: 'skel' }, h('i'), h('i'), h('i')))));
+    else if (!A.left.length) {
+      out.push(h('div', { class: 'box' }, h('div', { class: 'cell' }, h('div', { class: 'text' },
+        h('div', { class: 't' }, '남은 파일을 찾지 못했어요'),
+        h('div', { class: 'd wrap' }, '확실히 주인이 없는 파일만 찾기 때문에, 애매한 것은 일부러 건너뛰어요.')))));
+    } else {
+      const all = A.picked.size === A.left.length;
+      out.push(h('div', { class: 'box leftovers' },
+        h('div', { class: 'cat-tools' },
+          h('label', {}, h('input', {
+            type: 'checkbox', checked: all, indeterminate: A.picked.size > 0 && !all,
+            onchange: (e) => { A.picked = new Set(e.target.checked ? A.left.map((l) => l.path) : []); renderMain(); },
+          }), `전체 선택 (${nf.format(A.left.length)}개)`),
+          h('span', { class: 'grow' }),
+          h('button', { class: 'btn small' + (A.picked.size ? ' primary' : ''), id: 'leftBtn', disabled: !A.picked.size || A.busy, onclick: removeLeftovers },
+            icon('trash'), A.picked.size ? `${nf.format(A.picked.size)}개 · ${fmt(pickedSize)} 휴지통으로` : '휴지통으로')),
+        A.left.slice(0, 300).map((l) => {
+          const on = A.picked.has(l.path);
+          return h('label', { class: 'row' + (on ? ' picked' : '') },
+            h('input', { type: 'checkbox', checked: on, 'aria-label': `${l.id} 선택`, onchange: (e) => { if (e.target.checked) A.picked.add(l.path); else A.picked.delete(l.path); renderMain(); } }),
+            h('span', { class: 'thumb' }, icon('ghost')),
+            h('div', { class: 'file' }, h('div', { class: 'name', title: l.path }, l.id), h('div', { class: 'dir' }, split(l.path).dir)),
+            h('span', { class: 'acts' }, iconBtn('finder', 'Finder에서 보기', () => api.reveal(l.path))),
+            h('span', { class: 'kind' }, l.where),
+            h('span', { class: 'size num' }, fmt(l.size)));
+        })));
+      out.push(h('p', { class: 'foot' }, '이름이 "com.만든곳.앱" 꼴이고, 같은 곳에서 만든 앱이 하나도 설치돼 있지 않은 것만 보여줘요. 다시 설치할 계획이 있는 앱의 설정이라면 남겨 두세요.'));
+    }
+    return out;
+  }
+
   // ---------- 그리기: 전체 ----------
   function renderMain() {
     const main = $('main');
@@ -1155,7 +1311,7 @@
     const scrolls = {};
     for (const el of main.querySelectorAll('[data-scroll]')) scrolls[el.dataset.scroll] = [el.scrollTop, el.scrollLeft];
     NAV = null;
-    const kids = S.view === 'home' ? viewHome() : S.view === 'opt' ? viewOptimize() : viewBrowse(S.view);
+    const kids = S.view === 'home' ? viewHome() : S.view === 'opt' ? viewOptimize() : S.view === 'apps' ? viewApps() : viewBrowse(S.view);
     watchOptimize();
     const fill = browsing() && S.mode !== 'list' && !!NAV; // 계층 · 갤러리는 칸마다 따로 스크롤한다
     main.classList.toggle('fill', fill);

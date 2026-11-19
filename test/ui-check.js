@@ -125,6 +125,32 @@ const { makeHome } = require('./fixture');
     assert.ok(fs.existsSync(path.join(home, 'Library/Preferences/keep.plist')));
     await page.click('.nav-item:has-text("중복 파일")');
     assert.strictEqual(await page.locator('.group').count(), 0);
+    // 앱 탭: 안 쓰는 앱과, 지운 앱이 남긴 파일
+    await page.click('.nav-item:has-text("앱")');
+    await page.waitForSelector('.applist .cell:has-text("Old Tool")', { timeout: 30000 });
+    await page.waitForSelector('.leftovers .row', { timeout: 30000 });
+    assert.strictEqual(await page.locator('.leftovers .row').count(), 2, '찌꺼기는 50KB 넘는 확실한 것만');
+    assert.ok(!(await page.locator('.leftovers').innerText()).includes('com.example'), '설치된 앱과 같은 곳의 파일은 건드리지 않음');
+    await page.waitForTimeout(600);
+    await shot('8-apps');
+    // 찌꺼기 정리
+    await page.locator('.leftovers .cat-tools input').check();
+    await page.click('#leftBtn');
+    await page.click('.modal .btn.primary');
+    await page.waitForSelector('.toast:has-text("남은 파일 2개")', { timeout: 20000 });
+    assert.ok(!fs.existsSync(path.join(home, 'Library/Caches/com.gone.ghostapp')));
+    assert.ok(fs.existsSync(path.join(home, 'Library/Caches/com.example.oldtool')), '설치된 앱의 파일은 그대로');
+    // 앱 삭제: 관련 파일 목록을 보여주고, 함께 옮긴다
+    await page.click('.applist .cell:has-text("Old Tool") >> text=삭제…');
+    assert.strictEqual(await page.locator('.modal li').count(), 3);
+    await page.waitForTimeout(500);
+    await shot('8b-app-remove');
+    await page.click('.modal .btn.primary');
+    await page.waitForSelector('.toast:has-text("Old Tool")', { timeout: 20000 });
+    assert.ok(!fs.existsSync(path.join(home, 'Applications/Old Tool.app')), '앱이 옮겨져야 함');
+    assert.ok(!fs.existsSync(path.join(home, 'Library/Application Support/Old Tool')), '관련 파일도 옮겨져야 함');
+    assert.ok(fs.existsSync(path.join(home, 'Applications/Foo.app')), '다른 앱은 그대로');
+
     // 최적화 탭: 맥 상태, 무거운 프로그램, 자동 실행 항목
     await page.click('.nav-item:has-text("최적화")');
     await page.waitForSelector('.health .cell', { timeout: 20000 });

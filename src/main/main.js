@@ -8,6 +8,8 @@ const { Worker } = require('worker_threads');
 const { validateDeletion } = require('../core/safety');
 const { classifyFinderError, emptyTrashDir, finderTrashArgs, chunk } = require('../core/trash');
 const opt = require('../core/optimize');
+const apps = require('../core/apps');
+const { dirSize } = require('../core/walk');
 
 let win = null;
 let worker = null;
@@ -137,43 +139,53 @@ async function trashViaFinder(paths) {
   return { moved, why };
 }
 
-ipcMain.handle('files:trash', async (_e, paths) => {
-  if (!Array.isArray(paths)) return { trashed: [], failed: [], freed: 0 };
-  const { ok, rejected } = await validateDeletion(paths, { home: HOME, ...lastScan });
+/**
+ * 항목들을 휴지통으로 옮긴다. 먼저 앱이 직접 옮겨 보고, 맥이 막으면 Finder에 대신 부탁한다.
+ * (무엇을 옮겨도 되는지는 부르는 쪽에서 미리 검증해야 한다)
+ */
+async function moveToTrash(paths, onProgress) {
   const trashed = [];
-  const failed = [...rejected];
-  let freed = 0;
-  let needsPermission = false;
-  const markTrashed = (p) => {
-    trashed.push(p);
-    const k = lastScan.known.get(p);
-    if (k) freed += k.size;
-    lastScan.known.delete(p);
-  };
+  const failed = [];
   const blocked = []; // 앱이 직접 옮기지 못한 항목과 맥이 알려준 이유
-  for (let i = 0; i < ok.length; i++) {
-    const p = ok[i];
+  for (let i = 0; i < paths.length; i++) {
+    const p = paths[i];
     try {
       await shell.trashItem(p);
-      markTrashed(p);
+      trashed.push(p);
     } catch (e) {
       blocked.push({ path: p, why: String((e && e.message) || '').replace(/\s+/g, ' ').slice(0, 140) });
     }
-    if (i % 5 === 0) send('trash:progress', { done: i + 1, total: ok.length });
+    if (onProgress && i % 5 === 0) onProgress(i + 1, paths.length);
   }
+  let needsPermission = false;
   if (blocked.length) {
-    // 맥이 말끔의 접근을 막은 경우: Finder에게 대신 옮겨 달라고 부탁한다
     const viaFinder = await trashViaFinder(blocked.map((b) => b.path));
     if (win) win.focus();
     const moved = new Set(viaFinder.moved);
     for (const b of blocked) {
-      if (moved.has(b.path)) { markTrashed(b.path); continue; }
+      if (moved.has(b.path)) { trashed.push(b.path); continue; }
       needsPermission = true;
       const hint = viaFinder.why === 'automation'
         ? '맥이 말끔의 접근을 막고 있어요. 전체 디스크 접근 권한에서 Malkkeum을 켜 주세요'
         : b.why || '권한이 없거나 사용 중';
       failed.push({ path: b.path, reason: `휴지통으로 옮기지 못했어요 (${hint})` });
     }
+  }
+  return { trashed, failed, needsPermission };
+}
+
+ipcMain.handle('files:trash', async (_e, paths) => {
+  if (!Array.isArray(paths)) return { trashed: [], failed: [], freed: 0 };
+  const { ok, rejected } = await validateDeletion(paths, { home: HOME, ...lastScan });
+  const moved = await moveToTrash(ok, (done, total) => send('trash:progress', { done, total }));
+  const trashed = moved.trashed;
+  const failed = [...rejected, ...moved.failed];
+  const needsPermission = moved.needsPermission;
+  let freed = 0;
+  for (const p of trashed) {
+    const k = lastScan.known.get(p);
+    if (k) freed += k.size;
+    lastScan.known.delete(p);
   }
   // 옮긴 파일을 중복 묶음에서 빼고, 사본이 하나만 남은 묶음은 없앤다
   if (trashed.length) {
@@ -186,13 +198,13 @@ ipcMain.handle('files:trash', async (_e, paths) => {
 });
 
 ipcMain.handle('files:reveal', (_e, p) => {
-  if (typeof p === 'string' && lastScan.known.has(p)) shell.showItemInFolder(p);
+  if (typeof p === 'string' && (lastScan.known.has(p) || lastApps.has(p) || lastLeftovers.has(p))) shell.showItemInFolder(p);
   return true;
 });
 
 // 파일의 실제 모습: 사진·문서는 미리보기 그림, 그 밖에는 맥이 쓰는 파일 아이콘
 ipcMain.handle('files:thumb', async (_e, p, size) => {
-  if (typeof p !== 'string' || !lastScan.known.has(p)) return null;
+  if (typeof p !== 'string' || !(lastScan.known.has(p) || lastApps.has(p))) return null;
   const px = Math.min(640, Math.max(32, Number(size) || 72)); // 갤러리의 큰 미리보기는 더 크게
   if (IS_MAC) {
     try {
@@ -367,6 +379,108 @@ ipcMain.handle('opt:disable', async (_e, id) => {
 ipcMain.handle('opt:openLoginSettings', async () => {
   if (IS_MAC) await shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
   return true;
+});
+
+// ---------- 앱: 안 쓰는 앱 · 지운 앱의 찌꺼기 ----------
+let lastApps = new Map();      // 경로 → 마지막으로 보여준 앱 (삭제 요청 검증용)
+let lastLeftovers = new Map(); // 경로 → 마지막으로 보여준 찌꺼기
+
+async function readAppInfo(appPath) {
+  const file = path.join(appPath, 'Contents', 'Info.plist');
+  let info = { id: null, name: null };
+  try {
+    const buf = await fsp.readFile(file);
+    if (buf.subarray(0, 6).toString('latin1') === 'bplist') {
+      // 사람이 읽을 수 없는 형식이면 맥의 도구로 필요한 값만 꺼낸다
+      const get = (k) => run('/usr/bin/plutil', ['-extract', k, 'raw', '-o', '-', file]).then((v) => v.trim() || null);
+      const [id, dn, n] = await Promise.all([get('CFBundleIdentifier'), get('CFBundleDisplayName'), get('CFBundleName')]);
+      info = { id, name: dn || n };
+    } else info = apps.parseInfoPlistXml(buf.toString('utf8'));
+  } catch { /* Info.plist가 없는 앱 */ }
+  return { id: info.id, name: info.name || path.basename(appPath, '.app') };
+}
+async function mapLimit(list, n, fn) {
+  const out = new Array(list.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, list.length) }, async () => {
+    while (i < list.length) { const k = i++; out[k] = await fn(list[k], k); }
+  }));
+  return out;
+}
+// 폴더 크기: 맥·리눅스 공통의 du로 빠르게 재고, 안 되면 직접 센다
+async function sizeOf(p) {
+  const out = await run('/usr/bin/du', ['-sk', p], 120000);
+  const kb = parseInt(out, 10);
+  if (Number.isFinite(kb)) return kb * 1024;
+  return (await dirSize(p)).size;
+}
+const APP_DIRS = () => ['/Applications', path.join(HOME, 'Applications')];
+
+ipcMain.handle('apps:list', async () => {
+  const bundles = await apps.findAppBundles(APP_DIRS());
+  const list = await mapLimit(bundles, 8, async (p) => {
+    const info = await readAppInfo(p);
+    let lastUsed = null;
+    if (IS_MAC) lastUsed = apps.parseMdlsDate(await run('/usr/bin/mdls', ['-name', 'kMDItemLastUsedDate', '-raw', p]));
+    const related = [];
+    for (const c of apps.relatedCandidates(HOME, info)) { try { await fsp.lstat(c); related.push(c); } catch { /* 없음 */ } }
+    return { path: p, name: info.name, id: info.id, lastUsed, related, unused: apps.isUnused(lastUsed), removable: apps.canRemoveApp(p, HOME, info) };
+  });
+  // 애플 기본 앱과 말끔 자신은 목록에 넣지 않는다
+  const shown = list.filter((a) => a.removable);
+  lastApps = new Map(shown.map((a) => [a.path, a]));
+  return shown;
+});
+
+ipcMain.handle('apps:sizes', async () => {
+  const out = {};
+  await mapLimit([...lastApps.values()], 4, async (a) => {
+    const size = await sizeOf(a.path);
+    let relatedSize = 0;
+    for (const r of a.related) relatedSize += await sizeOf(r);
+    a.size = size; a.relatedSize = relatedSize;
+    out[a.path] = { size, relatedSize };
+  });
+  return out;
+});
+
+ipcMain.handle('apps:leftovers', async () => {
+  // 지금 설치된 모든 앱(시스템 앱 포함)을 기준으로, 주인이 없는 것만 찾는다
+  const bundles = await apps.findAppBundles([...APP_DIRS(), '/System/Applications', '/System/Library/CoreServices/Applications']);
+  const ids = (await mapLimit(bundles, 8, (p) => readAppInfo(p))).map((i) => i.id).filter(Boolean);
+  const found = await apps.findLeftovers(HOME, ids);
+  const items = (await mapLimit(found, 4, async (f) => ({ ...f, size: await sizeOf(f.path) }))).filter((f) => f.size >= 50 * 1000);
+  items.sort((a, b) => b.size - a.size);
+  lastLeftovers = new Map(items.map((i) => [i.path, i]));
+  return items;
+});
+
+ipcMain.handle('apps:trash', async (_e, appPath, withRelated) => {
+  const a = lastApps.get(appPath);
+  if (!a || !apps.canRemoveApp(a.path, HOME, a)) return { ok: false, reason: '지울 수 없는 앱이에요' };
+  // 실행 중인 앱은 지우지 않는다
+  const running = opt.parsePs(await run('/bin/ps', ['-Aeo', 'pid,user,pcpu,rss,comm']), os.userInfo().username)
+    .some((g) => g.isApp && g.name === path.basename(a.path, '.app'));
+  if (running) return { ok: false, reason: '앱이 실행 중이에요. 먼저 종료한 뒤 다시 시도해 주세요.' };
+  const targets = [a.path, ...(withRelated ? a.related : [])];
+  const res = await moveToTrash(targets);
+  const appGone = res.trashed.includes(a.path);
+  if (appGone) lastApps.delete(a.path);
+  let freed = 0;
+  if (appGone) freed += a.size || 0;
+  if (withRelated) freed += res.trashed.filter((p) => p !== a.path).length === a.related.length ? (a.relatedSize || 0) : 0;
+  return { ok: appGone, trashed: res.trashed.length, failed: res.failed, freed, needsPermission: res.needsPermission, reason: appGone ? null : (res.failed[0] && res.failed[0].reason) || '휴지통으로 옮기지 못했어요' };
+});
+
+ipcMain.handle('apps:trashLeftovers', async (_e, paths) => {
+  if (!Array.isArray(paths)) return { trashed: [], failed: [], freed: 0 };
+  const lib = path.join(HOME, 'Library') + path.sep;
+  // 방금 보여준 찌꺼기 목록에 있고, 라이브러리 폴더 안에 있는 것만 옮긴다
+  const okPaths = paths.filter((p) => typeof p === 'string' && lastLeftovers.has(p) && path.resolve(p) === p && p.startsWith(lib));
+  const res = await moveToTrash(okPaths);
+  let freed = 0;
+  for (const p of res.trashed) { freed += lastLeftovers.get(p).size; lastLeftovers.delete(p); }
+  return { trashed: res.trashed, failed: res.failed, freed, needsPermission: res.needsPermission };
 });
 
 ipcMain.handle('app:accent', () => (IS_MAC ? accentHex() : null));

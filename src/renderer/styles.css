@@ -349,6 +349,16 @@ input[type="checkbox"]:active { transform: scale(.9); }
 .row .chip { flex: none; font: var(--t-micro); font-weight: 500; color: var(--label2); background: var(--lift); padding: 3px 8px; border-radius: 6px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .group .row { min-height: 48px; }
 
+/* ---------- 앱 ---------- */
+.thumb.appicon { width: 40px; height: 40px; border-radius: 10px; background: var(--lift); }
+.thumb.appicon.has-img { background: none; }
+.applist .cell { min-height: 64px; }
+.applist .cell .btn { min-width: 58px; }
+.applist .cell .ibtn { opacity: 0; transition: opacity .2s var(--ease); }
+.applist .cell:hover .ibtn, .applist .cell .ibtn:focus-visible { opacity: 1; }
+.nav-item { padding: 9px 0 7px; }
+.modal .btns .btn { padding: 0 10px; white-space: nowrap; }
+
 /* ---------- 최적화 ---------- */
 .state { display: inline-flex; align-items: center; gap: 5px; font: var(--t-micro); padding: 3px 8px; border-radius: 99px; white-space: nowrap; }
 .state i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
