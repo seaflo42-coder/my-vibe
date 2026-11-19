@@ -83,7 +83,7 @@ npm run test:ui  # 실제 앱을 띄워 전체 흐름 확인 (가짜 폴더 사�
 npm run dist     # 맥에서 .dmg 만들기
 ```
 
-새 버전을 낼 때는 `package.json`의 `version` 숫자를 올리고 코드를 올리면 됩니다.
+새 버전을 낼 때는 `package.json`의 `version` 숫자를 올리고 코드를 올리면 됩니다. 새 버전이 내려받기 페이지에 올라가면 이전 버전은 자동으로 지워집니다.
 
 ## 구글 스티치(Stitch) 연결
 

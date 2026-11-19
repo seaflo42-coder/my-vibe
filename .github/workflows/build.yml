@@ -51,8 +51,9 @@ jobs:
           # 같은 버전이 이미 있으면 파일만 교체한다 (두 브랜치가 동시에 빌드해도 실패하지 않도록)
           gh release create "$TAG" dist/*.dmg --target "$GITHUB_SHA" --title "말끔 $VERSION" --notes "$NOTES" \
             || gh release upload "$TAG" dist/*.dmg --clobber
-          # 0.1.0에는 폴더와 그 안 파일의 중복본을 함께 고르면 모든 사본이 휴지통으로 갈 수 있는 문제가 있어
-          # 새 버전이 올라간 뒤 내려받기에서 지운다
-          if [ "$TAG" != "v0.1.0" ] && gh release view v0.1.0 >/dev/null 2>&1; then
-            gh release delete v0.1.0 --yes --cleanup-tag
-          fi
+          # 새 버전이 올라간 뒤에는 이전 버전을 모두 지운다 (내려받기 페이지에는 항상 최신 하나만 남긴다)
+          for OLD in $(gh release list --limit 100 --json tagName --jq '.[].tagName'); do
+            if [ "$OLD" != "$TAG" ]; then
+              gh release delete "$OLD" --yes --cleanup-tag
+            fi
+          done
