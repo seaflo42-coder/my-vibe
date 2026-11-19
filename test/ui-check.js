@@ -50,6 +50,14 @@ const { makeHome } = require('./fixture');
     await page.locator('.group').first().locator('.row:not(.picked) input').click();
     assert.strictEqual(await page.locator('.row.picked').count(), 3);
 
+    // 기준 줄: 이름을 누르면 이름순, 다시 누르면 반대로
+    const titles = () => page.locator('.group .title').allInnerTexts();
+    await page.click('.headbar .sh.file');
+    assert.deepStrictEqual(await titles(), ['photo-dup.bin', 'report.bin']);
+    await page.click('.headbar .sh.file');
+    assert.deepStrictEqual(await titles(), ['report.bin', 'photo-dup.bin']);
+    await page.click('.headbar .sh.size');
+
     // 검색: 이름이나 폴더로 좁혀 본다
     await page.click('#searchBtn');
     await page.fill('#searchInput', 'photo');
@@ -86,6 +94,8 @@ const { makeHome } = require('./fixture');
     await page.click('.nav-item:has-text("정리 추천")');
     await page.click('.cat-head:has-text("앱 임시 파일")');
     await page.locator('.cat:has-text("앱 임시 파일") .cat-tools input').check();
+    assert.strictEqual(await page.locator('.cat.open .row.head .sh').count(), 4);
+    assert.strictEqual(await page.locator('.cat.open .row:not(.head) .kind').first().innerText(), '폴더');
     await page.waitForTimeout(4200); // 안내 알림이 사라진 뒤 촬영
     await shot('4-reco');
 

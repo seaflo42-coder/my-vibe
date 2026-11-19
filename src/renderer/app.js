@@ -19,7 +19,7 @@
     dupShown: 40,
     openCats: new Set(),
     catShown: {},
-    largeSort: 'size',
+    sort: { key: 'size', dir: -1 }, // 정렬 기준: name · size · kind · date, 방향: 1 오름차순 / -1 내림차순
     busy: false,
     animate: true,
     mode: 'list',         // 보기 방식: list(목록) · columns(계층) · gallery(갤러리)
@@ -127,7 +127,7 @@
     $('toastRoot').replaceChildren(t);
     setTimeout(() => t.remove(), action ? 10000 : 4000);
   }
-  function modal({ glyph = 'trash', tone = '', title, body, list, confirm, cancel = '취소', danger }) {
+  function modal({ glyph = 'trash', tone = '', title, body, list, stack, confirm, cancel = '취소', danger }) {
     return new Promise((resolve) => {
       const close = (v) => { document.removeEventListener('keydown', onKey); ov.remove(); resolve(v); };
       const onKey = (e) => { if (e.key === 'Escape') close(false); };
@@ -137,7 +137,7 @@
           h('div', { class: 'orb ' + tone }, icon(glyph)),
           h('h2', {}, title),
           body && h('p', {}, body),
-          list && h('ul', {}, list.map((r) => h('li', {}, h('span', { class: 'li-t' }, r.title), h('span', { class: 'li-s num' }, r.sub)))),
+          list && h('ul', { class: stack ? 'stack' : '' }, list.map((r) => h('li', {}, h('span', { class: 'li-t' }, r.title), h('span', { class: 'li-s num' }, r.sub)))),
           h('div', { class: 'btns' }, cancel && h('button', { class: 'btn', onclick: () => close(false) }, cancel), okBtn)));
       document.addEventListener('keydown', onKey);
       $('modalRoot').append(ov);
@@ -197,8 +197,9 @@
   // 지름길: 지워도 안전한 것만 한 번에 고른다 (중복 사본 + '지워도 안전' 묶음)
   function selectAllSafe() {
     selectDuplicates('keep');
+    const keeps = new Set(S.result.groups.map((g) => g.keep)); // 묶음마다 남기기로 한 파일은 건드리지 않는다
     for (const c of S.result.categories) {
-      if (c.safety === 'safe') for (const i of c.items) toggle(i.path, i.size, true);
+      if (c.safety === 'safe') for (const i of c.items) if (!keeps.has(i.path)) toggle(i.path, i.size, true);
     }
     render();
     toast(`안전한 항목 ${nf.format(S.selected.size)}개를 골랐어요. 아래에서 휴지통으로 옮기세요.`);
@@ -254,10 +255,22 @@
       await modal({
         glyph: 'shield', title: `${nf.format(res.failed.length)}개 항목은 그대로 뒀어요`,
         body: res.trashed.length ? `나머지 ${nf.format(res.trashed.length)}개는 휴지통으로 옮겼어요.` : '안전을 위해 옮기지 않았어요.',
-        list: res.failed.slice(0, 30).map((f) => ({ title: split(f.path).name, sub: f.reason })),
+        list: failedByReason(res.failed), stack: true,
         confirm: '확인', cancel: null,
       });
     }
+  }
+  function failedByReason(failed) {
+    const by = new Map();
+    for (const f of failed) {
+      const names = by.get(f.reason) || [];
+      names.push(split(f.path).name);
+      by.set(f.reason, names);
+    }
+    return [...by].sort((a, b) => b[1].length - a[1].length).map(([reason, names]) => ({
+      title: reason,
+      sub: `${nf.format(names.length)}개 · ${names.slice(0, 3).join(', ')}${names.length > 3 ? ' 외' : ''}`,
+    }));
   }
   function recount() {
     const r = S.result;
@@ -570,31 +583,86 @@
     if (!ok) api.reveal(path);
   }
 
+  // ---------- 파일 종류 · 정렬 ----------
+  const KIND_BY_EXT = new Map();
+  for (const [kind, exts] of [
+    ['이미지', 'jpg jpeg png heic heif gif webp tiff tif bmp raw svg psd ai'], ['동영상', 'mov mp4 m4v avi mkv wmv webm'],
+    ['음악', 'mp3 m4a wav aiff flac aac'], ['PDF 문서', 'pdf'], ['프레젠테이션', 'ppt pptx key'],
+    ['문서', 'doc docx hwp hwpx pages txt rtf md'], ['스프레드시트', 'xls xlsx numbers csv'],
+    ['압축 파일', 'zip rar 7z tar gz tgz'], ['디스크 이미지', 'dmg iso'], ['설치 패키지', 'pkg mpkg xip'],
+  ]) for (const e of exts.split(' ')) KIND_BY_EXT.set(e, kind);
+  function kindOf(path, isDir) {
+    if (isDir) return '폴더';
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const dot = name.lastIndexOf('.');
+    const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+    return KIND_BY_EXT.get(ext) || (ext && ext.length <= 6 ? `${ext.toUpperCase()} 파일` : '파일');
+  }
+  const SORT_COLS = [['name', '이름'], ['kind', '종류'], ['date', '날짜'], ['size', '크기']];
+  const ko = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
+  /** 정렬 기준에 맞는 비교 함수. get(x)는 { name, kind, date, size }를 돌려준다. */
+  function sorter(get) {
+    const { key, dir } = S.sort;
+    return (x, y) => {
+      const a = get(x); const b = get(y);
+      const c = key === 'name' ? ko.compare(a.name, b.name)
+        : key === 'kind' ? ko.compare(a.kind, b.kind) || ko.compare(a.name, b.name)
+          : key === 'date' ? a.date - b.date : a.size - b.size;
+      return c * dir;
+    };
+  }
+  function setSort(key) {
+    S.sort = S.sort.key === key ? { key, dir: -S.sort.dir } : { key, dir: key === 'name' || key === 'kind' ? 1 : -1 };
+    try { localStorage.setItem('sort', JSON.stringify(S.sort)); } catch { /* 저장 못 해도 괜찮음 */ }
+    renderMain();
+  }
+  function sortBtn(key, label, cls) {
+    const on = S.sort.key === key;
+    return h('button', { class: `sh ${cls}${on ? ' on' : ''}`, 'aria-pressed': String(on), title: `${label} 순으로 정렬`, onclick: () => setSort(key) },
+      label, on && icon('chev', S.sort.dir > 0 ? 'arrow up' : 'arrow down'));
+  }
+  /** 목록 위의 기준 줄: 이름 · 종류 · 날짜 · 크기. 누르면 그 순서로 정렬되고, 다시 누르면 반대로. */
+  function sortHead(withThumb, nameLabel = '이름') {
+    return h('div', { class: 'row head' },
+      h('span', { class: 'sp check' }), withThumb && h('span', { class: 'sp thumbsp' }),
+      sortBtn('name', nameLabel, 'file'), h('span', { class: 'acts' }),
+      sortBtn('kind', '종류', 'kind'), sortBtn('date', '날짜', 'date'), sortBtn('size', '크기', 'size'));
+  }
+  /** 계층 · 갤러리처럼 칸이 좁은 보기에서 쓰는 정렬 단추 */
+  function sortChips() {
+    return h('div', { class: 'sortchips' }, h('span', { class: 'lbl' }, '정렬'), SORT_COLS.map(([k, l]) => sortBtn(k, l, 'chip')));
+  }
+
   // ---------- 살펴보기 공통: 묶음(중복 묶음 · 추천 종류)과 그 안의 항목 ----------
   // 세 가지 보기(목록 · 계층 · 갤러리)가 모두 같은 자료와 같은 선택 규칙을 쓴다.
   const query = () => S.query.trim().toLowerCase();
   const matches = (p) => { const s = query(); return !s || tilde(p).toLowerCase().includes(s); };
   function sections(kind) {
     const r = S.result;
+    const byItem = sorter((i) => ({ name: i.label, kind: i.kind, date: i.mtimeMs || 0, size: i.size }));
     if (kind === 'dups') {
       return r.groups
         .filter((g) => g.files.some((f) => matches(f.path))) // 묶음은 통째로 봐야 고를 수 있으므로 하나라도 맞으면 전부 보여준다
         .map((g) => {
           const keepName = split(g.keep).name;
+          const fileKind = kindOf(g.keep, false);
           return {
-            id: g.hash, kind, group: g, title: keepName, thumbPath: g.keep, total: g.wasted,
+            id: g.hash, kind, group: g, title: keepName, thumbPath: g.keep, total: g.wasted, fileKind,
+            date: Math.max(...g.files.map((f) => f.mtimeMs || 0)),
             sub: `똑같은 파일 ${g.files.length}개 · 각 ${fmt(g.size)}`,
             // 중복에서는 "어디에 있느냐"가 판단 기준이므로 위치를 제목으로 쓴다
-            items: g.files.map((f) => { const s = split(f.path); return { ...f, label: s.dir, sub: s.name === keepName ? '같은 이름' : s.name, name: s.name, dir: s.dir, keep: f.path === g.keep }; }),
+            items: g.files.map((f) => { const s = split(f.path); return { ...f, label: s.dir, sub: s.name === keepName ? '같은 이름' : s.name, name: s.name, dir: s.dir, kind: fileKind, keep: f.path === g.keep }; })
+              .sort(S.sort.key === 'date' ? byItem : (x, y) => ko.compare(x.label, y.label)),
           };
-        });
+        })
+        .sort(sorter((x) => ({ name: x.title, kind: x.fileKind, date: x.date, size: x.total })));
     }
     return r.categories
       .map((c) => ({
         id: c.id, kind, cat: c, title: c.title, tileId: c.id, safety: c.safety, desc: c.desc, total: c.total, unknown: c.unknownSize, action: c.action,
-        items: (c.id === 'large' && S.largeSort === 'old' ? [...c.items].sort((a, b) => a.mtimeMs - b.mtimeMs) : c.items)
-          .filter((i) => matches(i.path))
-          .map((i) => { const s = split(i.path); return { ...i, label: i.name || s.name, sub: s.dir, name: i.name || s.name, dir: s.dir }; }),
+        items: c.items.filter((i) => matches(i.path))
+          .map((i) => { const s = split(i.path); return { ...i, label: i.name || s.name, sub: s.dir, name: i.name || s.name, dir: s.dir, kind: kindOf(i.path, i.isDir) }; })
+          .sort(byItem),
       }))
       .filter((s) => (query() ? s.items.length > 0 : true));
   }
@@ -636,9 +704,7 @@
         type: 'checkbox', checked: all, indeterminate: picked.length > 0 && !all,
         onchange: (e) => { for (const i of sec.items) toggle(i.path, i.size, e.target.checked); render(); },
       }), `전체 선택 (${nf.format(sec.items.length)}개)`),
-      h('span', { class: 'grow' }),
-      sec.id === 'large' && h('div', { class: 'seg' }, [['size', '큰 순서'], ['old', '오래된 순서']].map(([v, l]) =>
-        h('button', { 'aria-pressed': String(S.largeSort === v), onclick: () => { S.largeSort = v; renderMain(); } }, l))));
+      h('span', { class: 'grow' }));
   }
   function trashActions() {
     return h('div', { class: 'cat-actions' },
@@ -657,7 +723,8 @@
     const gone = goneFn();
     const out = [];
     if (kind === 'dups') {
-      out.push(h('div', { class: 'leadrow' }, h('p', { class: 'lead' }, '내용이 한 글자도 다르지 않은 파일끼리 묶었어요. 어디에 있는 파일을 지울지 고르세요. 묶음마다 하나는 꼭 남아요.'), dupActions()));
+      out.push(h('div', { class: 'leadrow' }, h('p', { class: 'lead' }, '내용이 한 글자도 다르지 않은 파일끼리 묶었어요. 어디에 있는 파일을 지울지 고르세요. 묶음마다 하나는 꼭 남아요.'), dupActions()),
+        h('div', { class: 'headbar' }, sortHead(false)));
       for (const sec of secs.slice(0, S.dupShown)) {
         const picked = sec.items.filter((f) => gone(f.path)).length;
         out.push(h('section', { class: 'box group' },
@@ -688,7 +755,7 @@
         const body = h('div', { class: 'cat-body' });
         if (sec.action === 'emptyTrash') body.append(trashActions());
         else {
-          body.append(secHeadTools(sec, gone));
+          body.append(secHeadTools(sec, gone), sortHead(true));
           const shown = S.catShown[sec.id] || 30;
           for (const it of sec.items.slice(0, shown)) body.append(fileRow(sec, it, gone(it.path), true));
           if (sec.items.length > shown) {
@@ -708,6 +775,7 @@
       h('div', { class: 'file' }, h('div', { class: 'name', title: it.path }, it.label), h('div', { class: 'dir' }, it.sub)),
       keepBadge(it, on),
       h('span', { class: 'acts' }, !it.isDir && iconBtn('eye', '미리보기', () => preview(it.path)), iconBtn('finder', 'Finder에서 보기', () => api.reveal(it.path))),
+      h('span', { class: 'kind' }, it.kind),
       h('span', { class: 'date num' }, fmtDate(it.mtimeMs)),
       h('span', { class: 'size num' }, fmt(it.size)));
   }
@@ -736,7 +804,8 @@
           h('dt', {}, '위치'), h('dd', {}, it.dir),
           h('dt', {}, '크기'), h('dd', { class: 'num' }, fmt(it.size)),
           h('dt', {}, '수정한 날짜'), h('dd', { class: 'num' }, fmtDate(it.mtimeMs) || '알 수 없음'),
-          h('dt', {}, '종류'), h('dd', {}, sec.group ? '중복 파일' : sec.title)),
+          h('dt', {}, '종류'), h('dd', {}, it.kind),
+          h('dt', {}, '분류'), h('dd', {}, sec.group ? '중복 파일' : sec.title)),
         keepBadge(it, on),
         h('div', { class: 'dbtns' },
           h('button', { class: 'btn' + (on ? '' : ' primary'), onclick: () => { if (toggleItem(sec, it, !on)) render(); } }, icon(on ? 'x' : 'check'), on ? '선택 해제' : '지울 항목으로 고르기'),
@@ -775,7 +844,7 @@
         if (sec.items.length > shown) col2.append(h('div', { class: 'cat-more' }, h('button', { class: 'btn small', onclick: () => { S.catShown['col:' + sec.id] = shown + 300; renderMain(); } }, `${nf.format(sec.items.length - shown)}개 더 보기`)));
       }
     }
-    return [kind === 'dups' && dupActions(),
+    return [h('div', { class: 'toolsrow' }, sortChips(), h('span', { class: 'grow' }), kind === 'dups' && dupActions()),
       h('div', { class: 'browser columns' }, col1, col2, h('div', { class: 'col wide', 'data-scroll': 'c3' }, detail(sec, it, it ? gone(it.path) : false, false)))];
   }
 
@@ -802,7 +871,7 @@
         onclick: () => pick(kind, x.s.id, x.i.path), ondblclick: () => preview(x.i.path),
       }, thumb(x.i.path, x.i.isDir, 'md', 144), on && h('span', { class: 'tick' }, icon('check'))));
     }
-    return [kind === 'dups' && dupActions(),
+    return [h('div', { class: 'toolsrow' }, sortChips(), h('span', { class: 'grow' }), kind === 'dups' && dupActions()),
       h('div', { class: 'browser gallery' },
         here ? detail(here.s, here.i, gone(here.i.path), true) : detail(null, null, false, true),
         h('div', { class: 'strip-wrap' }, h('span', { class: 'count num' }, flat.length ? `${nf.format(at + 1)} / ${nf.format(flat.length)}` : ''), strip))];
@@ -938,6 +1007,7 @@
   if (api.onMenuScan) api.onMenuScan(startScan);
   if (api.onMenuTrash) api.onMenuTrash(trashSelected);
   if (api.onMenuFind) api.onMenuFind(() => { if (browsing()) openSearch(true); });
+  try { const v = JSON.parse(localStorage.getItem('sort')); if (v && SORT_COLS.some(([k]) => k === v.key)) S.sort = { key: v.key, dir: v.dir > 0 ? 1 : -1 }; } catch { /* 기본값 사용 */ }
   try { const m = localStorage.getItem('mode'); if (['list', 'columns', 'gallery'].includes(m)) S.mode = m; } catch { /* 기본값 사용 */ }
   setupTools();
   render();

@@ -1,7 +1,7 @@
 {
   "name": "malkkeum",
   "productName": "Malkkeum",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "말끔 — 맥 저장공간 정리 도구 (중복 파일 찾기, 정리 추천, 안전한 삭제)",
   "main": "src/main/main.js",
   "author": "seaflo42-coder",

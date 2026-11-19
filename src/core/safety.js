@@ -65,8 +65,10 @@ async function validateDeletion(paths, { home, roots = [], known, dupGroups = []
     if (!members.some(coveredBy)) continue;
     const alive = [];
     for (const m of members) if (await exists(m)) alive.push(m);
+    // 이미 사본이 하나만 남은 묶음(앞서 정리했거나 다른 곳에서 지움)은 더 이상 중복이 아니다.
+    // 그 파일은 평범한 파일이므로, 사용자가 고르면 지울 수 있어야 한다.
+    if (alive.length < 2) continue;
     if (alive.some((m) => !coveredBy(m))) continue; // 요청과 무관하게 남는 사본이 있음
-    if (!alive.length) continue;
     // 남길 사본을 고른다: 파일 하나만 빼면 되는 쪽을 먼저, 그다음 원본으로 추정된 파일
     const direct = alive.filter((m) => want.has(m));
     const pick = direct.find((m) => m === g.keep) || direct[0] || (alive.includes(g.keep) ? g.keep : alive[0]);

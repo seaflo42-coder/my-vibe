@@ -128,10 +128,19 @@ ipcMain.handle('files:trash', async (_e, paths) => {
       trashed.push(p);
       freed += lastScan.known.get(p).size;
       lastScan.known.delete(p);
-    } catch {
-      failed.push({ path: p, reason: '휴지통으로 옮기지 못했어요 (권한이 없거나 사용 중)' });
+    } catch (e) {
+      // 맥이 알려준 이유를 그대로 보여줘야 무엇이 문제인지 알 수 있다
+      const why = String((e && e.message) || '').replace(/\s+/g, ' ').slice(0, 140);
+      failed.push({ path: p, reason: why ? `휴지통으로 옮기지 못했어요 (${why})` : '휴지통으로 옮기지 못했어요 (권한이 없거나 사용 중)' });
     }
     if (i % 5 === 0) send('trash:progress', { done: i + 1, total: ok.length });
+  }
+  // 옮긴 파일을 중복 묶음에서 빼고, 사본이 하나만 남은 묶음은 없앤다
+  if (trashed.length) {
+    const goneNow = (m) => trashed.some((t) => m === t || m.startsWith(t + path.sep));
+    lastScan.dupGroups = lastScan.dupGroups
+      .map((g) => ({ ...g, files: g.files.filter((f) => !goneNow(f.path)) }))
+      .filter((g) => g.files.length > 1);
   }
   return { trashed, failed, freed };
 });

@@ -123,6 +123,20 @@ test('안전 검사: 폴더와 그 안 파일의 중복본을 함께 골라도 �
   fs2.rmSync(dir, { recursive: true }); fs2.rmSync(other, { recursive: true }); fs2.rmSync(outside);
 });
 
+test('안전 검사: 사본이 하나만 남은 묶음은 더 이상 막지 않는다', async () => {
+  const fs2 = require('fs');
+  const a = path.join(home, 'Documents/lone/only.bin');
+  const goneFile = path.join(home, 'Documents/lone/was-here.bin');
+  fs2.mkdirSync(path.dirname(a), { recursive: true }); fs2.writeFileSync(a, 'x');
+  const st = fs2.lstatSync(a);
+  const known = new Map([[a, { size: st.size, mtimeMs: st.mtimeMs }], [path.dirname(a), { size: 1, mtimeMs: 0, isDir: true }]]);
+  const groups = [{ keep: a, files: [{ path: a }, { path: goneFile }] }];
+  // 남은 하나를 직접 고르거나, 그 파일이 든 폴더를 골라도 지울 수 있어야 한다
+  assert.deepStrictEqual((await validateDeletion([a], { home, roots: [home], known, dupGroups: groups })).rejected, []);
+  assert.deepStrictEqual((await validateDeletion([path.dirname(a)], { home, roots: [home], known, dupGroups: groups })).rejected, []);
+  fs2.rmSync(path.dirname(a), { recursive: true });
+});
+
 test('안전 검사: 검사 뒤에 바뀐 파일은 지우지 않는다', async () => {
   const c = ctx();
   const p = path.join(home, 'Downloads/Installer.dmg');
