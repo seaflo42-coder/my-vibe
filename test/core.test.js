@@ -164,6 +164,9 @@ test('휴지통 비우기: 실패 원인을 가려내고, 휴지통 폴더만 �
   const args = finderTrashArgs([odd]);
   assert.strictEqual(args[args.length - 1], odd);
   assert.ok(!args.slice(0, args.indexOf('--')).some((a) => a.includes('따옴표')));
+  // 항목마다 따로 시도하고, 권한 없음(-1743)만 바로 알린다
+  const script = args.slice(0, args.indexOf('--')).filter((x) => x !== '-e').join('\n');
+  assert.match(script, /repeat with p in argv[\s\S]*try[\s\S]*-1743[\s\S]*end try[\s\S]*end repeat/);
   assert.deepStrictEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
 
   const fs2 = require('fs');

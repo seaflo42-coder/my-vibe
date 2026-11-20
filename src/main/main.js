@@ -124,9 +124,12 @@ async function trashViaFinder(paths) {
   const moved = [];
   let why = null;
   if (!IS_MAC || !paths.length) return { moved, why: 'unsupported' };
-  for (const part of chunk(paths, 150)) {
+  // 화면에 알린다: 허용 창이 다른 창 뒤에 숨어 있을 수 있어 사용자가 무엇을 기다리는지 알아야 한다
+  send('trash:notice', { kind: 'finder', count: paths.length });
+  for (const part of chunk(paths, 40)) {
     const res = await new Promise((resolve) => {
-      execFile('/usr/bin/osascript', finderTrashArgs(part), { timeout: 180000 }, (err, _out, stderr) => {
+      // 허용 창에 답하지 않으면 끝없이 기다리게 되므로 45초에서 끊는다
+      execFile('/usr/bin/osascript', finderTrashArgs(part), { timeout: 45000 }, (err, _out, stderr) => {
         resolve(err ? classifyFinderError(err, String(stderr || '')) : null);
       });
     });
@@ -134,7 +137,7 @@ async function trashViaFinder(paths) {
     for (const p of part) {
       try { await fsp.lstat(p); } catch { moved.push(p); } // 원래 자리에 없으면 옮겨진 것
     }
-    if (res === 'automation') break; // 권한이 없으면 나머지도 똑같이 실패한다
+    if (res === 'automation' || res === 'timeout') break; // 권한이 없거나 응답이 없으면 나머지도 똑같이 실패한다
   }
   return { moved, why };
 }
@@ -165,9 +168,9 @@ async function moveToTrash(paths, onProgress) {
     for (const b of blocked) {
       if (moved.has(b.path)) { trashed.push(b.path); continue; }
       needsPermission = true;
-      const hint = viaFinder.why === 'automation'
-        ? '맥이 말끔의 접근을 막고 있어요. 전체 디스크 접근 권한에서 Malkkeum을 켜 주세요'
-        : b.why || '권한이 없거나 사용 중';
+      const hint = viaFinder.why === 'automation' ? '맥이 말끔의 접근을 막고 있어요. 전체 디스크 접근 권한에서 Malkkeum을 켜 주세요'
+        : viaFinder.why === 'timeout' ? 'Finder가 응답하지 않았어요. 허용 창이 떠 있는지 확인하거나, 전체 디스크 접근 권한에서 Malkkeum을 켜 주세요'
+          : b.why || '권한이 없거나 사용 중';
       failed.push({ path: b.path, reason: `휴지통으로 옮기지 못했어요 (${hint})` });
     }
   }

@@ -49,11 +49,17 @@ async function emptyTrashDir(home) {
 // 경로는 스크립트 글자에 끼워 넣지 않고 인자로만 넘긴다 (이름에 따옴표 등이 있어도 안전하도록).
 const FINDER_TRASH_SCRIPT = [
   'on run argv',
-  'set theItems to {}',
   'repeat with p in argv',
-  'set end of theItems to (POSIX file (p as text)) as alias',
+  'try',
+  'set f to (POSIX file (p as text)) as alias',
+  'with timeout of 20 seconds',
+  'tell application "Finder" to delete f',
+  'end timeout',
+  'on error msg number n',
+  // 자동화 권한이 없으면(-1743) 나머지도 똑같이 실패하므로 바로 멈추고 알린다
+  'if n is -1743 then error msg number n',
+  'end try',
   'end repeat',
-  'tell application "Finder" to delete theItems',
   'end run',
 ];
 function finderTrashArgs(paths) {

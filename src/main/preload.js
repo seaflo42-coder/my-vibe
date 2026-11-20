@@ -42,4 +42,5 @@ contextBridge.exposeInMainWorld('api', {
   onScanDone: on('scan:done'),
   onScanError: on('scan:error'),
   onTrashProgress: on('trash:progress'),
+  onTrashNotice: on('trash:notice'),
 });

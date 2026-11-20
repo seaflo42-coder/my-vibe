@@ -241,7 +241,7 @@
     } catch {
       res = { trashed: [], failed: [], freed: 0, crashed: true };
     }
-    S.busy = false;
+    S.busy = false; endNotice();
     applyTrashed(res.trashed, res.freed);
     if (res.trashed.length) {
       const prev = S.done && !S.done.emptied ? S.done : { count: 0, freed: 0, freeBefore };
@@ -1190,6 +1190,29 @@
     if (days < 365) return `${Math.floor(days / 30)}개월 전 사용`;
     return `${Math.floor(days / 365)}년 넘게 안 씀`;
   }
+  // 맥이 직접 이동을 막아 Finder에 부탁하는 동안에는 허용 창이 숨어 있을 수 있다. 무엇을 기다리는지 알려준다.
+  function stickyNotice(msg) {
+    const t = h('div', { class: 'toast', role: 'status' }, h('span', {}, msg));
+    $('toastRoot').replaceChildren(t);
+    return () => t.remove();
+  }
+  let clearNotice = null;
+  if (api.onTrashNotice) {
+    api.onTrashNotice(() => {
+      if (clearNotice) clearNotice();
+      clearNotice = stickyNotice('맥이 직접 옮기는 것을 막아 Finder에 부탁하고 있어요. "허용" 창이 뜨면 허용을 눌러 주세요. 최대 1분쯤 걸려요.');
+    });
+  }
+  const endNotice = () => { if (clearNotice) { clearNotice(); clearNotice = null; } };
+  // 옮기지 못했을 때: 이유와 함께, 권한을 여는 곳을 바로 안내한다
+  async function explainBlocked(title, reason) {
+    const open = await modal({
+      glyph: 'lock', title,
+      body: `${reason || '맥이 말끔의 접근을 막고 있어요.'} 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 권한에서 Malkkeum을 켜고(이미 켜져 있으면 껐다 켜고) 말끔을 다시 열어 주세요. 앱을 새 버전으로 바꾸면 이 허용을 다시 해 줘야 해요.`,
+      confirm: '권한 설정 열기', cancel: '닫기',
+    });
+    if (open) api.openPrivacySettings();
+  }
   function afterTrash(freed, what) {
     refreshDisk();
     toast(`${what} 휴지통으로 옮겼어요${freed ? ` (${fmt(freed)})` : ''}. 휴지통을 비우면 공간이 확보돼요.`, { label: '휴지통 비우기', run: emptyTrash });
@@ -1204,18 +1227,19 @@
       confirm: hasRelated ? '앱과 관련 파일 모두' : '휴지통으로 이동', extra: hasRelated ? '앱만' : null,
     });
     if (!choice) return;
-    A.busy = true;
+    A.busy = a.path; renderMain();
     let res;
     try { res = await api.appsTrash(a.path, choice === true && hasRelated); } catch { res = { ok: false, reason: '옮기는 중 문제가 생겼어요.' }; }
-    A.busy = false;
+    A.busy = false; endNotice();
     if (res.ok) {
       A.apps = A.apps.filter((x) => x.path !== a.path);
       renderMain();
       afterTrash(res.freed, `${a.name}을(를)`);
-    } else if (res.needsPermission) {
-      const open = await modal({ glyph: 'lock', title: '앱을 옮기지 못했어요', body: res.reason, confirm: '권한 설정 열기', cancel: '닫기' });
-      if (open) api.openPrivacySettings();
-    } else toast(res.reason || '옮기지 못했어요.');
+    } else {
+      renderMain();
+      if (res.needsPermission) await explainBlocked(`${a.name}을(를) 옮기지 못했어요`, res.reason);
+      else await modal({ glyph: 'alert', tone: 'warn', title: `${a.name}을(를) 옮기지 못했어요`, body: res.reason || '알 수 없는 이유로 옮기지 못했어요.', confirm: '확인', cancel: null });
+    }
   }
   async function removeLeftovers() {
     if (A.busy || !A.picked.size) return;
@@ -1227,10 +1251,10 @@
       confirm: '휴지통으로 이동',
     });
     if (!ok) return;
-    A.busy = true;
+    A.busy = 'left'; renderMain();
     let res;
-    try { res = await api.appsTrashLeftovers(items.map((l) => l.path)); } catch { res = { trashed: [], failed: [], freed: 0 }; }
-    A.busy = false;
+    try { res = await api.appsTrashLeftovers(items.map((l) => l.path)); } catch { res = { trashed: [], failed: [{ path: '', reason: '옮기는 중 문제가 생겼어요' }], freed: 0 }; }
+    A.busy = false; endNotice();
     const gone = new Set(res.trashed);
     A.left = A.left.filter((l) => !gone.has(l.path));
     for (const p of gone) A.picked.delete(p);
@@ -1281,7 +1305,7 @@
             a.related.length ? ` · 관련 파일 ${a.related.length}개` : '')),
         h('span', { class: 'v num two' }, h('b', {}, a.size != null ? fmt(a.size) : '…'), a.relatedSize ? h('span', {}, `+ ${fmt(a.relatedSize)}`) : null),
         iconBtn('finder', 'Finder에서 보기', () => api.reveal(a.path)),
-        h('button', { class: 'btn small', disabled: A.busy, onclick: () => removeApp(a) }, '삭제…')));
+        h('button', { class: 'btn small', disabled: !!A.busy, onclick: () => removeApp(a) }, A.busy === a.path ? '옮기는 중…' : '삭제…')));
     }
     out.push(box, h('p', { class: 'foot' }, '맥이 사용 기록을 남기지 않은 앱은 "사용 기록 없음"으로 나와요. 실제로는 쓰는 앱일 수 있으니 이름을 보고 판단하세요. 실행 중인 앱은 지우지 않아요.'));
 
@@ -1303,8 +1327,8 @@
             onchange: (e) => { A.picked = new Set(e.target.checked ? A.left.map((l) => l.path) : []); renderMain(); },
           }), `전체 선택 (${nf.format(A.left.length)}개)`),
           h('span', { class: 'grow' }),
-          h('button', { class: 'btn small' + (A.picked.size ? ' primary' : ''), id: 'leftBtn', disabled: !A.picked.size || A.busy, onclick: removeLeftovers },
-            icon('trash'), A.picked.size ? `${nf.format(A.picked.size)}개 · ${fmt(pickedSize)} 휴지통으로` : '휴지통으로')),
+          h('button', { class: 'btn small' + (A.picked.size ? ' primary' : ''), id: 'leftBtn', disabled: !A.picked.size || !!A.busy, onclick: removeLeftovers },
+            icon('trash'), A.busy === 'left' ? '옮기는 중…' : A.picked.size ? `${nf.format(A.picked.size)}개 · ${fmt(pickedSize)} 휴지통으로` : '휴지통으로')),
         A.left.slice(0, 300).map((l) => {
           const on = A.picked.has(l.path);
           return h('label', { class: 'row' + (on ? ' picked' : '') },
