@@ -761,26 +761,52 @@
     return (p) => S.selected.has(p) || chosen.some((k) => p.startsWith(k + '/'));
   }
   /** 항목 하나를 고르거나 해제한다. 어느 보기에서든 이 함수 하나만 거친다. 거절되면 false. */
-  function toggleItem(sec, it, on) {
+  function toggleItem(sec, it, on, quiet) {
     if (sec.group) {
       const gone = goneFn();
       if (!on && !S.selected.has(it.path) && gone(it.path)) {
-        toast('이 파일이 들어 있는 폴더가 선택돼 있어요. 정리 추천에서 폴더 선택을 먼저 해제하세요.');
+        if (!quiet) toast('이 파일이 들어 있는 폴더가 선택돼 있어요. 정리 추천에서 폴더 선택을 먼저 해제하세요.');
         return false;
       }
       if (on && !sec.group.files.some((x) => x.path !== it.path && !gone(x.path))) {
-        toast('똑같은 파일 중 하나는 꼭 남겨야 해요.');
+        if (!quiet) toast('똑같은 파일 중 하나는 꼭 남겨야 해요.');
         return false;
       }
     }
     toggle(it.path, it.size, on);
     return true;
   }
+  // ---------- Shift로 범위 고르기 ----------
+  // 하나를 누른 뒤 Shift를 누른 채 다른 줄을 누르면, 그 사이의 줄이 모두 같은 상태가 된다 (Finder와 같은 방식).
+  const RANGE = { anchor: null, shift: false, reg: new Map() };
+  document.addEventListener('mousedown', (e) => {
+    RANGE.shift = e.shiftKey;
+    if (e.shiftKey && e.target.closest && e.target.closest('label.row')) e.preventDefault(); // 글자가 드래그 선택되지 않게
+  }, true);
+  document.addEventListener('keydown', () => { RANGE.shift = false; }, true);
+  /** 체크 상자에 범위 고르기를 붙인다. apply(on, quiet)는 그 줄 하나를 고르거나 해제한다. 범위로 처리했으면 true. */
+  function rangeKey(key, apply) { RANGE.reg.set(key, apply); return key; }
+  function rangePick(key, on) {
+    const anchor = RANGE.anchor;
+    RANGE.anchor = key;
+    if (!RANGE.shift || !anchor || anchor === key) return false;
+    const keys = [...document.querySelectorAll('#main input[data-key]')].map((x) => x.dataset.key);
+    const a = keys.indexOf(anchor), b = keys.indexOf(key);
+    if (a < 0 || b < 0) return false;
+    const fns = keys.slice(Math.min(a, b), Math.max(a, b) + 1).map((k) => RANGE.reg.get(k)).filter(Boolean);
+    for (const fn of fns) fn(on, true);
+    return true;
+  }
   function checkbox(sec, it, on) {
+    // 범위로 고를 때는 "원본 추정" 파일은 건너뛰어, 실수로 원본까지 고르지 않게 한다
+    const key = rangeKey(`${sec.id || sec.kind || ''}|${it.path}`, (v, quiet) => { if (!(quiet && v && it.keep)) toggleItem(sec, it, v, quiet); });
     return h('input', {
-      type: 'checkbox', checked: on, 'aria-label': `${it.name} 선택`,
+      type: 'checkbox', checked: on, 'aria-label': `${it.name} 선택`, 'data-key': key,
       onclick: (e) => e.stopPropagation(),
-      onchange: (e) => { if (!toggleItem(sec, it, e.target.checked)) e.target.checked = !e.target.checked; else render(); },
+      onchange: (e) => {
+        if (rangePick(key, e.target.checked)) { toggleItem(sec, it, e.target.checked, true); render(); return; }
+        if (!toggleItem(sec, it, e.target.checked)) e.target.checked = !e.target.checked; else render();
+      },
     });
   }
   const keepBadge = (it, on) => it.keep && !on && h('span', { class: 'keep' }, '원본 추정 · 남김');
@@ -1378,7 +1404,9 @@
         A.left.slice(0, 300).map((l) => {
           const on = A.picked.has(l.path);
           return h('label', { class: 'row' + (on ? ' picked' : '') },
-            h('input', { type: 'checkbox', checked: on, 'aria-label': `${l.id} 선택`, onchange: (e) => { if (e.target.checked) A.picked.add(l.path); else A.picked.delete(l.path); renderMain(); } }),
+            h('input', { type: 'checkbox', checked: on, 'aria-label': `${l.id} 선택`,
+              'data-key': rangeKey(`left|${l.path}`, (v) => { if (v) A.picked.add(l.path); else A.picked.delete(l.path); }),
+              onchange: (e) => { const v = e.target.checked; rangePick(`left|${l.path}`, v); if (v) A.picked.add(l.path); else A.picked.delete(l.path); renderMain(); } }),
             h('span', { class: 'thumb' }, icon('ghost')),
             h('div', { class: 'file' }, h('div', { class: 'name', title: l.path }, l.id), h('div', { class: 'dir' }, split(l.path).dir)),
             h('span', { class: 'acts' }, iconBtn('finder', 'Finder에서 보기', () => api.reveal(l.path))),
@@ -1483,6 +1511,7 @@
   // ---------- 그리기: 전체 ----------
   function renderMain() {
     const main = $('main');
+    RANGE.reg.clear();
     const top = main.scrollTop;
     const scrolls = {};
     for (const el of main.querySelectorAll('[data-scroll]')) scrolls[el.dataset.scroll] = [el.scrollTop, el.scrollLeft];

@@ -144,6 +144,19 @@ const { makeHome } = require('./fixture');
     await page.waitForFunction(() => document.querySelectorAll('.typelist .row:not(.head)').length === 1);
     await page.click('#searchClear');
     await page.waitForFunction(() => document.querySelectorAll('.typelist .row:not(.head)').length === 3);
+    // Shift로 범위 고르기: 첫 줄을 누르고, Shift를 누른 채 셋째 줄을 누르면 세 줄이 모두 선택된다
+    const trows = page.locator('.typelist label.row');
+    await trows.nth(0).locator('input').click();
+    await trows.nth(2).locator('input').click({ modifiers: ['Shift'] });
+    assert.match(await page.locator('#actionbar .info b').innerText(), /^3개/, 'Shift 범위 선택');
+    // 같은 방식으로 범위 해제
+    await trows.nth(0).locator('input').click({ modifiers: ['Shift'] });
+    assert.strictEqual(await page.locator('.typelist label.row.picked').count(), 0, 'Shift 범위 해제');
+    // 체크 상자가 아니라 줄 자체를 눌러도 똑같이 동작한다
+    await trows.nth(0).locator('.size').click();
+    await trows.nth(2).locator('.size').click({ modifiers: ['Shift'] });
+    assert.strictEqual(await page.locator('.typelist label.row.picked').count(), 3, '줄을 눌러 Shift 범위 선택');
+    await page.click('.typelist .cat-tools >> text=선택 해제');
     // 모두 고르기 → 휴지통
     await page.click('#typeAll');
     assert.match(await page.locator('#actionbar .info b').innerText(), /^3개/);
