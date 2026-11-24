@@ -162,10 +162,15 @@ const { makeHome } = require('./fixture');
     assert.match(await page.locator('#actionbar .info b').innerText(), /^3개/);
     await page.waitForTimeout(400);
     await shot('9b-types-picked');
+    // 고른 뒤에 파일 하나가 다른 곳에서 먼저 지워진 경우: 실패 창을 띄우지 않고 목록에서 조용히 뺀다
+    fs.rmSync(path.join(home, 'Documents/design/icon.eps'));
     await page.click('#trashBtn');
     await page.click('.modal .btn.primary');
     // 옮긴 뒤에도 파일 종류 탭에 그대로 머문다 (저장공간 화면으로 튀지 않음)
-    await page.waitForSelector('.toast:has-text("3개 항목을 휴지통으로 옮겼어요")', { timeout: 30000 });
+    await page.waitForSelector('.toast:has-text("2개 항목을 휴지통으로 옮겼어요")', { timeout: 30000 });
+    assert.ok((await page.locator('.toast').last().innerText()).includes('이미 없어진 1개'), '이미 없어진 파일 안내');
+    assert.strictEqual(await page.locator('.modal').count(), 0, '이미 없어진 파일로 실패 창을 띄우지 않음');
+    assert.strictEqual(await page.locator('#actionbar .info b').count() ? await page.locator('.typelist label.row.picked').count() : 0, 0, '선택이 남아 있지 않아야 함');
     assert.ok(await page.locator('.nav-item[aria-current="page"]:has-text("파일 종류"), .nav-item.on:has-text("파일 종류"), .nav-item.active:has-text("파일 종류")').count(), '파일 종류 탭에 머물러야 함');
     assert.ok(await page.locator('.browser.types').count(), '파일 종류 화면이 그대로 보여야 함');
     for (const f of ['logo.ai', 'poster.psd', 'icon.eps']) assert.ok(!fs.existsSync(path.join(home, 'Documents/design', f)), f + ' 는 옮겨져야 함');

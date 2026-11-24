@@ -246,8 +246,11 @@
     }
     S.busy = false; endNotice();
     let stay = false;
+    const gone = res.gone || [];
     applyTrashed(res.trashed, res.freed);
-    if (S.result && res.trashed.length) { try { S.result.types = await api.typesSummary(); } catch { /* 그대로 둠 */ } T.key = null; }
+    // 이미 사라진 파일은 목록에서 빼기만 한다 (휴지통 용량에는 더하지 않는다)
+    if (gone.length) { applyTrashed(gone, 0); }
+    if (S.result && (res.trashed.length || gone.length)) { try { S.result.types = await api.typesSummary(); } catch { /* 그대로 둠 */ } T.key = null; }
     if (res.trashed.length) {
       const prev = S.done && !S.done.emptied ? S.done : { count: 0, freed: 0, freeBefore };
       S.done = { count: prev.count + res.trashed.length, freed: prev.freed + res.freed, freeBefore: prev.freeBefore, emptied: false, freeAfter: null };
@@ -256,8 +259,9 @@
       else { S.view = 'home'; S.animate = true; }
     }
     render();
-    if (stay) toast(`${nf.format(res.trashed.length)}개 항목을 휴지통으로 옮겼어요 (${fmt(res.freed)}). 휴지통을 비우면 공간이 확보돼요.`, { label: '휴지통 비우기', run: emptyTrash });
+    if (stay) toast(`${nf.format(res.trashed.length)}개 항목을 휴지통으로 옮겼어요 (${fmt(res.freed)}).${gone.length ? ` 이미 없어진 ${nf.format(gone.length)}개는 목록에서 뺐어요.` : ''} 휴지통을 비우면 공간이 확보돼요.`, { label: '휴지통 비우기', run: emptyTrash });
     else $('main').scrollTop = 0;
+    if (gone.length && !(stay && res.trashed.length)) toast(res.trashed.length ? `이미 없어진 ${nf.format(gone.length)}개는 목록에서 뺐어요.` : `고른 ${nf.format(gone.length)}개는 이미 없어진 파일이라 목록에서 뺐어요.`);
     if (res.crashed) {
       await modal({ glyph: 'alert', tone: 'warn', title: '옮기는 중 문제가 생겼어요', body: '아무것도 지워지지 않았어요. 다시 검사한 뒤 시도해 주세요.', confirm: '확인', cancel: null });
     } else if (res.failed.length) {
@@ -305,6 +309,7 @@
     }
     r.categories = r.categories.filter((c) => c.id === 'trash' || c.items.length);
     let trash = r.categories.find((c) => c.id === 'trash');
+    if (!trash && !freed) { recount(); return; }
     if (!trash) {
       trash = { id: 'trash', title: '휴지통', desc: '이미 버린 파일들이에요. 휴지통을 비워야 실제로 공간이 생겨요.', safety: 'safe', items: [], total: 0, action: 'emptyTrash' };
       r.categories.unshift(trash);

@@ -186,32 +186,40 @@ ipcMain.handle('files:trash', async (_e, paths) => {
   if (!Array.isArray(paths)) return { trashed: [], failed: [], freed: 0 };
   const { ok, rejected } = await validateDeletion(paths, { home: HOME, ...lastScan });
   const moved = await moveToTrash(ok, (done, total) => send('trash:progress', { done, total }));
-  const trashed = moved.trashed;
-  const failed = [...rejected, ...moved.failed];
-  const needsPermission = moved.needsPermission;
+  const trashed = [...moved.trashed];
+  // 옮기지 못했다고 나왔지만 실제로는 자리에 없는 파일은 옮겨진 것으로 본다 (Finder가 늦게 답한 경우)
+  const stillFailed = [];
+  for (const f of moved.failed) {
+    try { await fsp.lstat(f.path); stillFailed.push(f); } catch { trashed.push(f.path); }
+  }
+  // 고르기 전에 이미 사라진 파일(다른 곳에서 지웠거나 앱이 스스로 치운 임시 파일)은 실패가 아니다. 목록에서 조용히 뺀다
+  const gone = rejected.filter((r) => r.reason === '이미 없어졌어요').map((r) => r.path);
+  const failed = [...rejected.filter((r) => r.reason !== '이미 없어졌어요'), ...stillFailed];
+  const needsPermission = moved.needsPermission && stillFailed.length > 0;
   let freed = 0;
   for (const p of trashed) {
     const k = lastScan.known.get(p);
     if (k) freed += k.size;
-    lastScan.known.delete(p);
   }
-  // 옮긴 파일을 확장자 목록에서도 뺀다
-  if (trashed.length && lastScan.typeFiles.size) {
-    const gone = new Set(trashed);
+  const removed = [...trashed, ...gone];
+  for (const p of removed) lastScan.known.delete(p);
+  // 없어진 파일을 확장자 목록에서도 뺀다
+  if (removed.length && lastScan.typeFiles.size) {
+    const set = new Set(removed);
     for (const [e, arr] of lastScan.typeFiles) {
-      const left = arr.filter((f) => !gone.has(f.path));
+      const left = arr.filter((f) => !set.has(f.path));
       if (left.length) lastScan.typeFiles.set(e, left); else lastScan.typeFiles.delete(e);
     }
     typedCache = null;
   }
-  // 옮긴 파일을 중복 묶음에서 빼고, 사본이 하나만 남은 묶음은 없앤다
-  if (trashed.length) {
-    const goneNow = (m) => trashed.some((t) => m === t || m.startsWith(t + path.sep));
+  // 없어진 파일을 중복 묶음에서 빼고, 사본이 하나만 남은 묶음은 없앤다
+  if (removed.length) {
+    const goneNow = (m) => removed.some((t) => m === t || m.startsWith(t + path.sep));
     lastScan.dupGroups = lastScan.dupGroups
       .map((g) => ({ ...g, files: g.files.filter((f) => !goneNow(f.path)) }))
       .filter((g) => g.files.length > 1);
   }
-  return { trashed, failed, freed, needsPermission };
+  return { trashed, failed, freed, needsPermission, gone };
 });
 
 ipcMain.handle('files:reveal', (_e, p) => {
