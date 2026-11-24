@@ -1,16 +1,21 @@
 'use strict';
 // "파일 종류" 탭에서 찾아 주는 확장자 목록. 묶음 순서와 이름이 화면에 그대로 나온다.
+const w = (list) => list.split(' ');
 const TYPE_GROUPS = [
-  { id: 'design', title: '디자인', kind: '디자인 파일', exts: ['ai', 'eps', 'psd', 'psb', 'indd', 'idml', 'sketch', 'fig', 'xd', 'afdesign', 'afphoto', 'afpub', 'svg', 'cdr', 'xcf', 'procreate', 'clip'] },
-  { id: 'image', title: '이미지', kind: '이미지', exts: ['jpg', 'jpeg', 'png', 'gif', 'heic', 'heif', 'webp', 'tif', 'tiff', 'bmp', 'ico', 'raw', 'cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'orf', 'rw2'] },
-  { id: 'video', title: '동영상', kind: '동영상', exts: ['mov', 'mp4', 'm4v', 'avi', 'mkv', 'wmv', 'webm', 'flv', 'mpg', 'mpeg', 'mts', 'm2ts', '3gp', 'ts', 'vob', 'mxf', 'braw', 'r3d'] },
-  { id: 'audio', title: '음악·소리', kind: '소리 파일', exts: ['mp3', 'm4a', 'wav', 'aif', 'aiff', 'flac', 'aac', 'ogg', 'wma', 'opus', 'mid', 'caf'] },
-  { id: 'doc', title: '문서', kind: '문서', exts: ['pdf', 'doc', 'docx', 'hwp', 'hwpx', 'ppt', 'pptx', 'xls', 'xlsx', 'pages', 'numbers', 'key', 'txt', 'rtf', 'md', 'csv', 'epub', 'odt'] },
-  { id: 'archive', title: '압축 파일', kind: '압축 파일', exts: ['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'alz', 'egg', 'lzh', 'cab', 'sit', 'zipx'] },
-  { id: 'install', title: '설치·디스크', kind: '설치 파일', exts: ['dmg', 'pkg', 'iso', 'img', 'exe', 'msi', 'apk', 'ipa', 'xip', 'toast'] },
-  { id: 'project', title: '영상·음악 작업', kind: '작업 파일', exts: ['prproj', 'aep', 'drp', 'fcpxml', 'logicx', 'band', 'als', 'ptx', 'cpr', 'veg', 'mogrt'] },
-  { id: '3d', title: '3D·도면', kind: '3D·도면', exts: ['blend', 'fbx', 'obj', 'stl', 'c4d', 'max', 'ma', 'mb', 'skp', 'dwg', 'dxf', '3ds', 'glb', 'gltf', 'usdz'] },
-  { id: 'font', title: '글꼴', kind: '글꼴', exts: ['ttf', 'otf', 'ttc', 'woff', 'woff2'] },
+  { id: 'design', title: '디자인', kind: '디자인 파일', exts: w('ai ait eps psd psb psdt indd indt idml sketch fig xd afdesign afphoto afpub svg svgz cdr xcf procreate clip csp kra ora sai mdp pdn pxd pxm graffle drawio vsdx studio') },
+  { id: 'image', title: '이미지', kind: '이미지', exts: w('jpg jpeg jpe jfif png gif heic heif webp avif jxl tif tiff bmp ico icns tga exr hdr pcx raw cr2 cr3 crw nef nrw arw srf sr2 dng raf orf rw2 pef srw x3f erf kdc 3fr iiq') },
+  { id: 'video', title: '동영상', kind: '동영상', exts: w('mov mp4 m4v avi mkv wmv webm flv f4v mpg mpeg m2v mts m2ts m2t ts 3gp 3g2 vob mxf ogv divx asf rm rmvb dv mod tod braw r3d insv lrv') },
+  { id: 'audio', title: '음악·소리', kind: '소리 파일', exts: w('mp3 m4a m4b m4r wav aif aiff aifc flac alac aac ogg oga wma opus mid midi caf amr ape wv mka ac3 dts dsf au ra') },
+  { id: 'doc', title: '문서', kind: '문서', exts: w('pdf doc docx docm dot dotx hwp hwpx hwt ppt pptx pptm pps ppsx xls xlsx xlsm xlsb pages numbers key show cell txt rtf md csv tsv odt ods odp tex xps one wps') },
+  { id: 'ebook', title: '전자책·메일', kind: '전자책·메일', exts: w('epub mobi azw azw3 fb2 djvu cbz cbr eml msg mbox ics vcf') },
+  { id: 'archive', title: '압축 파일', kind: '압축 파일', exts: w('zip zipx rar 7z tar gz tgz bz2 tbz tbz2 xz txz lz lzma zst z cpio arj ace alz egg lzh lha cab sit sitx jar war 001') },
+  { id: 'install', title: '설치·디스크', kind: '설치 파일', exts: w('dmg pkg mpkg iso img exe msi apk ipa xip toast deb rpm appimage vmdk vdi vhd vhdx qcow2 sparseimage') },
+  { id: 'temp', title: '받다 만·임시 파일', kind: '임시 파일', exts: w('crdownload part partial tmp temp bak old torrent') },
+  { id: 'project', title: '영상·음악 작업', kind: '작업 파일', exts: w('prproj aep aet drp fcpxml logicx band als ptx ptf cpr veg mogrt imovieproj rpp flp sesx') },
+  { id: 'subtitle', title: '자막', kind: '자막', exts: w('srt smi ass ssa vtt sub idx') },
+  { id: '3d', title: '3D·도면', kind: '3D·도면', exts: w('blend fbx obj stl ply dae abc c4d max ma mb skp dwg dxf 3ds 3mf glb gltf usd usda usdc usdz step stp iges igs sldprt sldasm f3d rvt ifc ztl zpr spp sbsar hip') },
+  { id: 'font', title: '글꼴', kind: '글꼴', exts: w('ttf otf ttc woff woff2 eot dfont pfb') },
+  { id: 'code', title: '코드·데이터', kind: '코드·데이터', exts: w('json xml yaml yml html htm css scss js mjs jsx tsx py ipynb java kt c cpp h hpp m swift go rs rb php sh sql db sqlite sqlite3 log') },
 ];
 const EXT_SET = new Set(TYPE_GROUPS.flatMap((g) => g.exts));
 

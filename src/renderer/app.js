@@ -1381,54 +1381,68 @@
     render();
   }
   function viewTypes() {
+    T.panes = false;
     if (S.scanning) return [emptyState('search', '검사하는 중이에요', '끝나면 여기에 결과가 나타나요.')];
     if (!S.result) return [emptyState('types', '아직 검사하지 않았어요', '검사를 하면 확장자별로 파일을 찾아 드려요. 예: ai, psd, mov, zip', true)];
     const sum = S.result.types || {};
-    const groups = (S.result.typeGroups || []).map((g) => ({ ...g, found: g.exts.filter((e) => sum[e]) })).filter((g) => g.found.length);
+    const groups = (S.result.typeGroups || []).map((g) => ({ ...g, found: g.exts.filter((e) => sum[e]).sort((x, y) => sum[y].size - sum[x].size) })).filter((g) => g.found.length);
     if (!groups.length) return [emptyState('done', '찾은 파일이 없어요', '검사한 곳에서 디자인·동영상·압축 파일 같은 종류를 찾지 못했어요.')];
+    T.panes = true;
 
-    const out = [h('p', { class: 'lead' }, '찾고 싶은 확장자를 누르면 그 파일만 모아서 보여드려요. 여러 개를 함께 골라도 돼요.')];
-    // 1) 확장자 고르기
-    out.push(h('div', { class: 'box typepick' }, groups.map((g) => {
-      const allOn = g.found.every((e) => T.exts.has(e));
-      const gSize = g.found.reduce((n, e) => n + sum[e].size, 0);
-      return h('div', { class: 'tgroup' },
-        h('button', { class: 'tg-head' + (allOn ? ' on' : ''), 'aria-pressed': String(allOn), title: `${g.title} 전체 ${allOn ? '해제' : '선택'}`, onclick: () => toggleExts(g.found, !allOn) },
-          h('span', { class: 'tg-t' }, g.title), h('span', { class: 'tg-s num' }, fmt(gSize))),
-        h('div', { class: 'tchips' }, g.found.sort((a, b) => sum[b].size - sum[a].size).map((e) =>
-          h('button', { class: 'tchip' + (T.exts.has(e) ? ' on' : ''), 'aria-pressed': String(T.exts.has(e)), 'data-ext': e, onclick: () => toggleExts([e], !T.exts.has(e)) },
-            h('b', {}, `.${e}`), h('span', { class: 'num' }, `${nf.format(sum[e].count)}개 · ${fmt(sum[e].size)}`)))));
-    })));
+    // 왼쪽: 확장자 고르기. 묶음마다 머리줄 + 같은 너비의 단추 격자
+    const picker = h('div', { class: 'col typepick', 'data-scroll': 'tp', role: 'group', 'aria-label': '확장자 고르기' },
+      h('div', { class: 'tp-top' },
+        h('span', { class: 'tp-cap' }, '확장자'),
+        h('span', { class: 'tp-hint num' }, T.exts.size ? `${nf.format(T.exts.size)}개 고름` : '눌러서 고르세요'),
+        T.exts.size ? h('button', { class: 'btn small plain', onclick: () => toggleExts([...T.exts], false) }, '모두 해제') : null),
+      groups.map((g) => {
+        const allOn = g.found.every((e) => T.exts.has(e));
+        const gSize = g.found.reduce((n, e) => n + sum[e].size, 0);
+        return h('section', { class: 'tgroup' },
+          h('div', { class: 'tg-head' },
+            h('span', { class: 'tg-t' }, g.title),
+            h('span', { class: 'tg-s num' }, fmt(gSize)),
+            h('button', { class: 'tg-all' + (allOn ? ' on' : ''), 'aria-pressed': String(allOn), onclick: () => toggleExts(g.found, !allOn) }, allOn ? '해제' : '전체')),
+          h('div', { class: 'tchips' }, g.found.map((e) => {
+            const on = T.exts.has(e);
+            return h('button', { class: 'tchip' + (on ? ' on' : ''), 'aria-pressed': String(on), 'data-ext': e, title: `.${e} 파일 ${nf.format(sum[e].count)}개 · ${fmt(sum[e].size)}`, onclick: () => toggleExts([e], !on) },
+              h('span', { class: 'tc-text' }, h('b', {}, `.${e}`), h('span', { class: 'num' }, `${nf.format(sum[e].count)}개 · ${fmt(sum[e].size)}`)),
+              h('i', { class: 'tc-check' }, on ? icon('check') : null));
+          })));
+      }));
 
-    // 2) 고른 확장자의 파일 목록
+    // 오른쪽: 고른 확장자의 파일 목록
+    const list = h('div', { class: 'col wide typelist', 'data-scroll': 'tl' });
     if (!T.exts.size) {
-      out.push(h('p', { class: 'foot' }, '시스템 파일, 앱, 사진 보관함, 숨김 폴더 안의 파일은 여기에 나오지 않아요.'));
-      return out;
+      list.append(h('div', { class: 'empty small' }, h('div', { class: 'orb' }, icon('types')),
+        h('h2', {}, '찾을 확장자를 골라 주세요'),
+        h('p', {}, '왼쪽에서 확장자를 누르면 그 파일만 모아서 보여드려요. 여러 개를 함께 골라도 돼요.')));
+    } else {
+      loadTypes();
+      const fresh = T.key === typeKey();
+      const picked = T.items.filter((i) => S.selected.has(i.path)).length;
+      list.append(
+        h('div', { class: 'tl-head' },
+          h('div', { class: 'tl-title', title: [...T.exts].sort().map((e) => `.${e}`).join(' ') }, [...T.exts].sort().map((e) => `.${e}`).join('  ')),
+          h('span', { class: 'tl-sum num' }, fresh ? `${nf.format(T.total)}개 · ${fmt(T.totalSize)}` : '찾는 중이에요')),
+        h('div', { class: 'cat-tools' },
+          h('button', { class: 'btn small', id: 'typeAll', disabled: !T.total, onclick: () => selectAllTyped(true) }, icon('check'), `${nf.format(T.total)}개 모두 고르기`),
+          h('button', { class: 'btn small plain', onclick: () => selectAllTyped(false) }, '선택 해제'),
+          h('span', { class: 'grow' }),
+          picked ? h('span', { class: 'num' }, `이 화면에서 ${nf.format(picked)}개 선택됨`) : null),
+        sortHead(true));
+      const sec = { kind: 'types' };
+      for (const f of T.items) {
+        const s = split(f.path);
+        list.append(fileRow(sec, { ...f, label: s.name, sub: s.dir, name: s.name, dir: s.dir, kind: kindOf(f.path, false) }, S.selected.has(f.path), true));
+      }
+      if (!T.items.length && fresh) list.append(h('div', { class: 'cell' }, h('div', { class: 'text' }, h('div', { class: 't' }, '조건에 맞는 파일이 없어요'))));
+      if (T.total > T.items.length) {
+        list.append(h('div', { class: 'cat-more' }, h('button', { class: 'btn small', onclick: () => { T.limit += 200; renderMain(); } }, `${nf.format(T.total - T.items.length)}개 더 보기`)));
+      }
+      list.append(h('p', { class: 'foot inpane' }, '줄을 두 번 누르면 내용을 미리 볼 수 있어요. 똑같은 파일이 여러 개면, 실수로 전부 지우지 않도록 하나는 남겨 둬요.'));
     }
-    loadTypes();
-    const fresh = T.key === typeKey();
-    const picked = T.items.filter((i) => S.selected.has(i.path)).length;
-    out.push(h('div', { class: 'caption' }, [...T.exts].sort().map((e) => `.${e}`).join('  '),
-      h('span', { class: 'side num' }, fresh ? `${nf.format(T.total)}개 · ${fmt(T.totalSize)}` : '찾는 중이에요')));
-    const box = h('div', { class: 'box typelist' },
-      h('div', { class: 'cat-tools' },
-        h('button', { class: 'btn small', id: 'typeAll', disabled: !T.total, onclick: () => selectAllTyped(true) }, icon('check'), `${nf.format(T.total)}개 모두 고르기`),
-        h('button', { class: 'btn small plain', onclick: () => selectAllTyped(false) }, '선택 해제'),
-        h('span', { class: 'grow' }),
-        picked ? h('span', { class: 'num' }, `이 화면에서 ${nf.format(picked)}개 선택됨`) : null),
-      sortHead(true));
-    const sec = { kind: 'types' };
-    for (const f of T.items) {
-      const s = split(f.path);
-      const it = { ...f, label: s.name, sub: s.dir, name: s.name, dir: s.dir, kind: kindOf(f.path, false) };
-      box.append(fileRow(sec, it, S.selected.has(f.path), true));
-    }
-    if (!T.items.length && fresh) box.append(h('div', { class: 'cell' }, h('div', { class: 'text' }, h('div', { class: 't' }, '조건에 맞는 파일이 없어요'))));
-    if (T.total > T.items.length) {
-      box.append(h('div', { class: 'cat-more' }, h('button', { class: 'btn small', onclick: () => { T.limit += 200; renderMain(); } }, `${nf.format(T.total - T.items.length)}개 더 보기`)));
-    }
-    out.push(box, h('p', { class: 'foot' }, '줄을 두 번 누르면 내용을 미리 볼 수 있어요. 똑같은 파일이 여러 개면, 실수로 전부 지우지 않도록 하나는 남겨 둬요.'));
-    return out;
+    return [h('div', { class: 'browser types' }, picker, list)];
   }
 
   // ---------- 그리기: 전체 ----------
@@ -1440,7 +1454,8 @@
     NAV = null;
     const kids = S.view === 'home' ? viewHome() : S.view === 'opt' ? viewOptimize() : S.view === 'apps' ? viewApps() : S.view === 'types' ? viewTypes() : viewBrowse(S.view);
     watchOptimize();
-    const fill = browsing() && S.view !== 'types' && S.mode !== 'list' && !!NAV; // 계층 · 갤러리는 칸마다 따로 스크롤한다
+    // 계층 · 갤러리 보기와 파일 종류 탭은 칸마다 따로 스크롤한다
+    const fill = (browsing() && S.view !== 'types' && S.mode !== 'list' && !!NAV) || (S.view === 'types' && !!T.panes); // 계층 · 갤러리는 칸마다 따로 스크롤한다
     main.classList.toggle('fill', fill);
     main.replaceChildren(h('div', { class: 'wrap' + (S.animate ? ' fresh' : '') + (fill ? ' fill' : '') }, kids));
     const fresh = S.animate;

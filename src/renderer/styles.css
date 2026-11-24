@@ -349,24 +349,44 @@ input[type="checkbox"]:active { transform: scale(.9); }
 .row .chip { flex: none; font: var(--t-micro); font-weight: 500; color: var(--label2); background: var(--lift); padding: 3px 8px; border-radius: 6px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 .group .row { min-height: 48px; }
 
-/* ---------- 파일 종류 ---------- */
-.typepick { padding: 8px; }
-.tgroup { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 6px; }
-.tgroup + .tgroup { border-top: 1px solid var(--separator); }
-.tg-head { display: grid; gap: 1px; text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 12px; transition: background .2s var(--ease); }
-.tg-head:hover { background: var(--lift); }
-.tg-head.on { background: var(--lift-strong); box-shadow: inset 0 1px 0 rgba(255,255,255,.2); }
+/* ---------- 파일 종류: 왼쪽에서 확장자를 고르고 오른쪽에서 파일을 본다 ---------- */
+.browser.types { display: grid; grid-template-columns: 318px minmax(0, 1fr); }
+.typepick { padding: 0 10px 12px; overflow-x: hidden; }
+.tp-top { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 46px; margin: 0 -10px; padding: 0 10px 0 18px; background: rgba(38,40,48,.86); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); border-bottom: 1px solid var(--separator); }
+.tp-cap { font: var(--t-headline); font-weight: 700; }
+.tp-hint { flex: 1; font: var(--t-caption); color: var(--label2); }
+.tgroup { padding: 14px 0 4px; }
+.tgroup + .tgroup { border-top: 1px solid var(--separator); margin-top: 10px; }
+/* 묶음 머리줄: 이름 · 용량 · 전체 단추가 한 밑선에 놓인다 */
+.tg-head { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 2px 0 8px; margin-bottom: 8px; }
 .tg-t { font: var(--t-headline); }
-.tg-s { font: var(--t-caption); color: var(--label2); }
-.tchips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 3px; }
-.tchip { display: inline-flex; align-items: baseline; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 99px; background: rgba(255,255,255,.07); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); transition: background .2s var(--ease), transform .2s var(--ease); }
-.tchip:hover { background: var(--lift-strong); }
-.tchip:active { transform: scale(.96); }
-.tchip b { font: var(--t-body); font-weight: 600; }
-.tchip span { font: var(--t-caption); color: var(--label2); }
-.tchip.on { background: var(--accent); box-shadow: inset 0 1px 0 rgba(255,255,255,.3); }
-.tchip.on span { color: rgba(255,255,255,.85); }
+.tg-s { flex: 1; font: var(--t-caption); color: var(--label2); }
+.tg-all { height: 24px; padding: 0 10px; border: 0; border-radius: 99px; background: none; font: var(--t-micro); color: var(--label2); transition: background .2s var(--ease), color .2s var(--ease); }
+.tg-all:hover { background: var(--lift); color: var(--label); }
+.tg-all.on { background: var(--lift-strong); color: #fff; }
+/* 확장자 단추: 모두 같은 너비 · 같은 높이의 격자. 글자는 왼쪽 정렬 두 줄, 체크는 오른쪽 세로 가운데 */
+.tchips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.tchip { display: grid; grid-template-columns: minmax(0, 1fr) 20px; align-items: center; gap: 6px; height: 50px; padding: 0 10px 0 12px; border: 0; border-radius: 14px; text-align: left; background: rgba(255,255,255,.055); box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); transition: background .2s var(--ease), transform .2s var(--ease); }
+.tchip:hover { background: var(--lift); }
+.tchip:active { transform: scale(.97); }
+.tc-text { display: grid; gap: 2px; min-width: 0; }
+.tc-text b { font: var(--t-body); font-weight: 600; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-text span { font: var(--t-micro); font-weight: 400; line-height: 1.2; color: var(--label2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-check { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.28); }
+.tc-check svg { width: 11px; height: 11px; stroke-width: 3.2; color: #fff; }
+/* 고른 단추는 목록의 '선택된 줄'과 같은 옅은 강조색 + 체크 */
+.tchip.on { background: color-mix(in srgb, var(--accent) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.tchip.on .tc-check { background: var(--accent); box-shadow: inset 0 1px 0 rgba(255,255,255,.35); }
+.tchip.on .tc-text span { color: rgba(255,255,255,.8); }
+.typelist { padding: 0 6px 6px; overflow-x: hidden; }
+.tl-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px; height: 46px; margin: 0 -6px; padding: 0 18px; background: rgba(38,40,48,.86); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); border-bottom: 1px solid var(--separator); }
+.tl-title { flex: 1; min-width: 0; font: var(--t-headline); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-sum { font: var(--t-caption); color: var(--label2); white-space: nowrap; }
 .typelist .cat-tools { gap: 6px; }
+.foot.inpane { margin: 12px 0 8px; padding: 0 12px; }
+.empty.small { padding: 84px 24px; }
+.empty.small .orb { width: 68px; height: 68px; }
+.empty.small .orb svg { width: 28px; height: 28px; }
 [hidden] { display: none !important; }
 nav { gap: 2px; }
 .nav-item { padding: 8px 0 6px; }
