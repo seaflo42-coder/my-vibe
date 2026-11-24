@@ -105,6 +105,47 @@ async function buildRecommendations({ home, files, now = Date.now(), useBirthtim
     cats.push(category('dev', 'Xcode 임시 파일', 'Xcode가 만든 임시 자료예요. 지워도 다시 만들어져요.', 'safe', devItems));
   }
 
+  // 5-1) 브라우저 임시 파일: 웹사이트를 빨리 열려고 쌓아 둔 자료. 방문 기록·로그인·책갈피는 건드리지 않는다
+  step('브라우저 임시 파일');
+  const browserItems = [];
+  const addBrowser = async (label, p) => {
+    const { size } = await dirSize(p, isCancelled);
+    if (size >= MIN_ITEM) browserItems.push({ path: p, name: label, size, mtimeMs: 0, isDir: true });
+  };
+  await addBrowser('Safari', path.join(lib, 'Containers', 'com.apple.Safari', 'Data', 'Library', 'Caches'));
+  await addBrowser('Safari (예전 위치)', path.join(lib, 'Caches', 'com.apple.Safari'));
+  for (const [label, base] of [['Chrome', 'Google/Chrome'], ['Edge', 'Microsoft Edge'], ['웨일', 'Naver/Whale'], ['Brave', 'BraveSoftware/Brave-Browser'], ['Arc', 'Arc/User Data']]) {
+    const root = path.join(lib, 'Application Support', ...base.split('/'));
+    for (const ent of await listChildren(root)) {
+      if (!ent.isDirectory() || !(ent.name === 'Default' || /^Profile \d+$/.test(ent.name))) continue;
+      const who = ent.name === 'Default' ? '' : ` ${ent.name.replace('Profile', '프로필')}`;
+      for (const [sub, what] of [['Service Worker/CacheStorage', '웹사이트 저장 자료'], ['Code Cache', '실행 캐시'], ['GPUCache', '그래픽 캐시']]) {
+        await addBrowser(`${label}${who} · ${what}`, path.join(root, ent.name, ...sub.split('/')));
+      }
+    }
+  }
+  browserItems.sort((a, b) => b.size - a.size);
+  if (browserItems.length) {
+    cats.push(category('browsers', '브라우저 임시 파일', '웹사이트를 빨리 열려고 쌓아 둔 자료예요. 방문 기록, 로그인, 책갈피는 그대로예요. 브라우저를 닫고 지우면 더 깔끔해요.', 'safe', browserItems));
+  }
+
+  // 5-2) 메일에서 열어 본 첨부 파일 사본
+  step('메일 첨부 사본');
+  const mailDl = await sizedChildren(path.join(lib, 'Containers', 'com.apple.mail', 'Data', 'Library', 'Mail Downloads'), { isCancelled, minSize: 100 * 1000 });
+  if (mailDl.length) {
+    cats.push(category('mailDownloads', '메일 첨부 사본', '메일에서 첨부 파일을 열 때 따로 저장된 사본이에요. 지워도 메일 안의 원본 첨부는 그대로예요.', 'safe', mailDl));
+  }
+
+  // 5-3) 아이폰·아이패드 업데이트 설치 파일
+  step('기기 업데이트 파일');
+  const ipsw = [];
+  for (const dir of ['iTunes/iPhone Software Updates', 'iTunes/iPad Software Updates']) {
+    ipsw.push(...await sizedChildren(path.join(lib, ...dir.split('/')), { isCancelled, filter: (n) => /\.ipsw$/i.test(n) }));
+  }
+  if (ipsw.length) {
+    cats.push(category('iosUpdates', '기기 업데이트 파일', '아이폰·아이패드를 업데이트할 때 내려받은 파일이에요. 업데이트가 끝났다면 필요 없어요.', 'safe', ipsw));
+  }
+
   // 6) 오래된 다운로드
   step('오래된 다운로드');
   const oldDl = [];

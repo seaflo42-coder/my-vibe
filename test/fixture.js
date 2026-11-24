@@ -51,6 +51,13 @@ function makeHome() {
   write(path.join(home, 'Library/Logs/app.log'), crypto.randomBytes(2 * MB));
   write(path.join(home, 'Library/Preferences/keep.plist'), a);
   write(path.join(home, '.Trash/junk.bin'), crypto.randomBytes(1 * MB));
+  // 지워도 안전한 항목 확인용: 브라우저 임시 파일, 메일 첨부 사본
+  write(path.join(home, 'Library/Application Support/Google/Chrome/Default/Code Cache/js/blob'), crypto.randomBytes(1500 * 1000));
+  write(path.join(home, 'Library/Application Support/Google/Chrome/Default/Bookmarks'), 'keep');
+  write(path.join(home, 'Library/Containers/com.apple.mail/Data/Library/Mail Downloads/A1B2/계약서.pdf'), crypto.randomBytes(300 * 1000));
+  // 보안 점검 확인용: 알려진 가짜 정리 프로그램 이름의 자동 실행 항목
+  write(path.join(home, 'Library/LaunchAgents/com.mackeeper.agent.plist'),
+    '<?xml version="1.0"?><plist><dict><key>Label</key><string>com.mackeeper.agent</string><key>ProgramArguments</key><array><string>/Users/Shared/.helper/agent</string></array><key>RunAtLoad</key><true/></dict></plist>');
   // 파일 종류 탭 확인용: 디자인·동영상 파일 (작은 것도 찾아야 한다)
   write(path.join(home, 'Documents/design/logo.ai'), crypto.randomBytes(200 * 1000));
   write(path.join(home, 'Documents/design/poster.psd'), crypto.randomBytes(1500 * 1000));

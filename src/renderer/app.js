@@ -137,7 +137,7 @@
           h('div', { class: 'orb ' + tone }, icon(glyph)),
           h('h2', {}, title),
           body && h('p', {}, body),
-          list && h('ul', { class: stack ? 'stack' : '' }, list.map((r) => h('li', {}, h('span', { class: 'li-t' }, r.title), h('span', { class: 'li-s num' }, r.sub)))),
+          list && h('ul', { class: stack ? 'stack' : '' }, list.map((r) => h('li', {}, h('span', { class: 'li-t' }, r.title, r.tag && h('span', { class: 'chipq' }, r.tag)), h('span', { class: 'li-s num' }, r.sub)))),
           h('div', { class: 'btns' }, cancel && h('button', { class: 'btn', onclick: () => close(false) }, cancel),
             extra && h('button', { class: 'btn', onclick: () => close('extra') }, extra), okBtn)));
       document.addEventListener('keydown', onKey);
@@ -389,7 +389,7 @@
         h('button', { class: 'btn', onclick: () => loadApps(true) }, icon('again'), '다시 확인'));
     } else if (S.view === 'opt') {
       kids.push(h('h1', {}, '최적화'), h('span', { class: 'grow' }),
-        h('button', { class: 'btn', onclick: () => { O.health = null; O.startup = null; renderMain(); loadOptimize(true); } }, icon('again'), '다시 확인'));
+        h('button', { class: 'btn', onclick: () => { O.health = null; O.startup = null; O.security = null; renderMain(); loadOptimize(true); } }, icon('again'), '다시 확인'));
     } else {
       const dups = S.view === 'dups';
       kids.push(h('h1', {}, dups ? '중복 파일' : '정리 추천'));
@@ -408,7 +408,7 @@
   const CAT_LOOK = {
     dups: ['copy', 'var(--accent)'], trash: ['trash', 'var(--gray)'], installers: ['box', 'var(--teal)'],
     caches: ['bolt', 'var(--green)'], logs: ['doc', 'var(--gray)'], dev: ['wrench', 'var(--indigo)'],
-    oldDownloads: ['clock', 'var(--orange)'], iosBackups: ['phone', 'var(--purple)'], large: ['large', 'var(--orange)'],
+    oldDownloads: ['clock', 'var(--orange)'], browsers: ['globe', 'var(--accent)'], mailDownloads: ['mail', 'var(--teal)'], iosUpdates: ['phone', 'var(--indigo)'], iosBackups: ['phone', 'var(--purple)'], large: ['large', 'var(--orange)'],
   };
   function tile(id) {
     const [ic, color] = CAT_LOOK[id] || ['doc', 'var(--gray)'];
@@ -481,7 +481,7 @@
       h('div', { class: 'treemap', role: 'list', 'aria-label': '정리할 수 있는 항목 지도' }, rects.map((q) => {
         const small = q.w < 11 || q.h < 9;
         return h('button', {
-          class: `tm ${q.item.tone}${small ? ' sm' : ''}`, role: 'listitem', title: `${q.item.title} · ${fmt(q.item.size)}`,
+          class: `tm ${q.item.tone}${small ? ' sm' : ''}${q.h < 5.5 ? ' xs' : ''}`, role: 'listitem', title: `${q.item.title} · ${fmt(q.item.size)}`,
           style: `left:${q.x}%;top:${(q.y / H) * 100}%;width:${q.w}%;height:${(q.h / H) * 100}%`, onclick: q.item.run,
         }, h('span', { class: 'tm-in' }, h('span', { class: 'tm-t' }, q.item.title), h('span', { class: 'tm-v num' }, fmt(q.item.size))));
       })));
@@ -1056,7 +1056,7 @@
   });
 
   // ---------- 최적화: 맥 상태 · 무거운 프로그램 · 자동 실행 ----------
-  const O = { health: null, procs: null, startup: null, sort: 'cpu', loading: false, timer: null };
+  const O = { health: null, security: null, procs: null, startup: null, sort: 'cpu', loading: false, timer: null };
   async function loadOptimize(all) {
     if (O.loading) return;
     O.loading = true;
@@ -1064,6 +1064,7 @@
       const jobs = [api.optProcesses().then((v) => { O.procs = v; })];
       if (all || !O.health) jobs.push(api.optHealth().then((v) => { O.health = v; }));
       if (all || !O.startup) jobs.push(api.optStartup().then((v) => { O.startup = v; }));
+      if (all || !O.security) jobs.push(api.optSecurity().then((v) => { O.security = v; }));
       await Promise.all(jobs.map((j) => j.catch(() => {})));
     } finally { O.loading = false; }
     if (S.view === 'opt') renderMain();
@@ -1075,7 +1076,8 @@
     if (!on && O.timer) { clearInterval(O.timer); O.timer = null; }
   }
   const HEALTH_ICON = { disk: 'disk', memory: 'memory', uptime: 'timer', battery: 'battery' };
-  const STATUS_WORD = { good: '좋음', warn: '살펴보기', bad: '조치 필요' };
+  const STATUS_WORD = { good: '좋음', warn: '살펴보기', bad: '조치 필요', info: '참고' };
+  const SEC_ICON = { gatekeeper: 'shield', sip: 'lock', launch: 'power', profiles: 'settings', filevault: 'disk', firewall: 'wall', unsigned: 'apps' };
   async function quitApp(g) {
     const ok = await modal({
       glyph: 'power', title: `${g.name}을(를) 종료할까요?`,
@@ -1098,7 +1100,7 @@
     if (res.ok) { O.startup = O.startup.filter((x) => x.id !== it.id); toast(`${it.name}의 자동 실행을 껐어요.`); renderMain(); } else toast(res.reason || '끄지 못했어요.', { label: '설정 열기', run: () => api.openLoginSettings() });
   }
   function viewOptimize() {
-    const out = [h('p', { class: 'lead' }, '맥이 느려지는 흔한 원인 세 가지를 살펴봐요. 여기서는 파일을 지우지 않아요.')];
+    const out = [h('p', { class: 'lead' }, '맥이 느려지는 흔한 원인과 기본 보안 상태를 살펴봐요. 여기서는 파일을 지우지 않아요.')];
 
     // 1) 맥 상태
     out.push(h('div', { class: 'caption' }, '맥 상태'));
@@ -1111,6 +1113,27 @@
           h('div', { class: 'd wrap' }, c.advice)),
         h('span', { class: 'v num' }, c.value),
         c.action === 'goHome' && h('button', { class: 'btn small', onclick: () => go('home') }, '정리하러 가기')))));
+    }
+
+    // 1-1) 보안 점검
+    out.push(h('div', { class: 'caption' }, '보안 점검',
+      h('button', { class: 'btn small plain', onclick: () => api.openSecuritySettings() }, icon('settings'), '시스템 설정에서 보기')));
+    if (!O.security) out.push(h('div', { class: 'box' }, [0, 1, 2].map(() => h('div', { class: 'skel' }, h('i'), h('i'), h('i')))));
+    else if (!O.security.length) {
+      out.push(h('div', { class: 'box' }, h('div', { class: 'cell' }, h('div', { class: 'text' },
+        h('div', { class: 't' }, '보안 상태를 읽지 못했어요'),
+        h('div', { class: 'd wrap' }, '시스템 설정 → 개인정보 보호 및 보안에서 직접 확인해 주세요.')))));
+    } else {
+      out.push(h('div', { class: 'box security' }, O.security.map((c) => h('div', { class: 'cell tiled' },
+        h('span', { class: 'tile ghost' }, icon(SEC_ICON[c.id] || 'shield')),
+        h('div', { class: 'text' },
+          h('div', { class: 't' }, c.title, h('span', { class: 'state ' + c.status }, h('i'), STATUS_WORD[c.status])),
+          h('div', { class: 'd wrap' }, c.advice),
+          c.items && c.items.length > 0 && h('ul', { class: 'sublist' }, c.items.slice(0, 8).map((x) =>
+            h('li', {}, h('b', {}, x.name), h('span', {}, x.detail))),
+            c.items.length > 8 && h('li', {}, h('span', {}, `외 ${nf.format(c.items.length - 8)}개`)))),
+        h('span', { class: 'v num' }, c.value)))));
+      out.push(h('p', { class: 'foot' }, '말끔은 백신이 아니에요. 악성코드를 찾아내거나 치료하지 않고, 맥의 기본 보호 기능이 켜져 있는지와 눈에 띄는 위험 신호만 살펴봐요. 모두 "좋음"이어도 안전을 보장하지는 않아요.'));
     }
 
     // 2) 지금 무거운 프로그램
@@ -1154,8 +1177,9 @@
       out.push(h('div', { class: 'box startup' }, O.startup.map((it) => h('div', { class: 'cell tiled' },
         h('span', { class: 'tile ghost' }, icon('power')),
         h('div', { class: 'text' },
-          h('div', { class: 't' }, it.name, h('span', { class: 'chipq' }, it.kind === 'login' ? '로그인할 때 열림' : it.scope === 'system' ? '뒤에서 실행 · 시스템 전체' : '뒤에서 실행')),
-          h('div', { class: 'd', title: it.detail }, it.detail)),
+          h('div', { class: 't' }, it.name, h('span', { class: 'chipq' }, it.kind === 'login' ? '로그인할 때 열림' : it.scope === 'system' ? '뒤에서 실행 · 시스템 전체' : '뒤에서 실행'),
+            it.suspect && h('span', { class: 'state bad' }, h('i'), '수상함')),
+          h('div', { class: 'd', title: it.detail }, it.suspect ? `${it.suspect} · ${it.detail}` : it.detail)),
         it.scope === 'user' ? h('button', { class: 'btn small', onclick: () => disableStartup(it) }, '끄기')
           : h('button', { class: 'btn small plain', onclick: () => api.openLoginSettings() }, '설정에서 끄기')))));
       out.push(h('p', { class: 'foot' }, '무엇인지 모르는 항목은 그대로 두는 편이 안전해요. 시스템 전체에 설치된 항목은 맥 보안 때문에 시스템 설정에서만 끌 수 있어요.'));
@@ -1230,12 +1254,18 @@
   }
   async function removeApp(a) {
     if (A.busy) return;
-    const hasRelated = a.related.length > 0;
+    // 지우기 전에 이 앱이 남긴 파일을 한 번 더 꼼꼼히 찾는다
+    let related = a.related || [];
+    try { related = await api.appsRelated(a.path); } catch { /* 앞서 찾은 목록을 쓴다 */ }
+    a.related = related;
+    const hasRelated = related.length > 0;
+    const relSize = related.reduce((n, r) => n + (r.size || 0), 0);
+    const WHY = { exact: '이 앱 전용', prefix: '이 앱의 도우미', team: '같은 개발사 보관함', system: '맥 전체에 설치됨' };
     const choice = await modal({
       glyph: 'trash', title: `${a.name}을(를) 휴지통으로 옮길까요?`,
-      body: hasRelated ? '앱과 함께, 이 앱이 만든 아래 파일도 옮길 수 있어요. 휴지통에서 다시 꺼낼 수 있어요.' : '휴지통에서 다시 꺼낼 수 있어요.',
-      list: hasRelated ? a.related.map((p) => { const s = split(p); return { title: s.name, sub: s.dir }; }) : null, stack: hasRelated,
-      confirm: hasRelated ? '앱과 관련 파일 모두' : '휴지통으로 이동', extra: hasRelated ? '앱만' : null,
+      body: hasRelated ? `앱 ${fmt(a.size || 0)}와 함께, 이 앱이 남긴 파일 ${nf.format(related.length)}개(${fmt(relSize)})도 옮길 수 있어요. 휴지통에서 다시 꺼낼 수 있어요.` : '이 앱이 따로 남긴 파일은 찾지 못했어요. 휴지통에서 다시 꺼낼 수 있어요.',
+      list: hasRelated ? related.map((r) => { const s = split(r.path); return { title: s.name, tag: WHY[r.why] || null, sub: `${fmt(r.size || 0)} · ${tilde(s.dir)}` }; }) : null, stack: hasRelated,
+      confirm: hasRelated ? '앱과 남긴 파일 모두' : '휴지통으로 이동', extra: hasRelated ? '앱만' : null,
     });
     if (!choice) return;
     A.busy = a.path; renderMain();

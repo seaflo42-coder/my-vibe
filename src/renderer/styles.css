@@ -493,3 +493,16 @@ main.fill { overflow: hidden; padding-bottom: 90px; -webkit-mask-image: none; ma
   .tier { flex-direction: column; align-items: flex-start; }
   .row .date, .row .kind { display: none; }
 }
+
+/* 보안 점검 */
+.state.info { color: #9ecbff; background: rgba(10,132,255,.18); }
+.sublist { list-style: none; margin: 10px 0 2px; padding: 4px 12px; background: var(--recess); border-radius: 12px; }
+.sublist li { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; font: var(--t-caption); color: var(--label2); min-width: 0; }
+.sublist li + li { border-top: 1px solid var(--separator); }
+.sublist b { font-weight: 600; color: var(--label); flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sublist span { min-width: 0; overflow-wrap: anywhere; }
+.box.security .cell { align-items: flex-start; }
+.box.security .cell > .v { padding-top: 2px; }
+.modal .li-t .chipq { margin-left: 8px; vertical-align: 1px; }
+/* 아주 낮은 블록은 용량만 보여준다 (이름은 마우스를 올리면 나온다) */
+.tm.xs .tm-t { display: none; }

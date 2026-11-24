@@ -55,6 +55,11 @@ test('정리 추천이 올바른 묶음으로 나온다', () => {
   assert.deepStrictEqual(by.installers.items.map((i) => i.name), ['Installer.dmg']);
   assert.deepStrictEqual(by.caches.items.map((i) => i.name), ['com.example.app']);
   assert.deepStrictEqual(by.logs.items.map((i) => i.name), ['app.log']);
+  // 브라우저 임시 파일: 캐시만 잡고 책갈피 같은 자료는 잡지 않는다
+  assert.deepStrictEqual(by.browsers.items.map((i) => i.name).sort(), ['Chrome · 실행 캐시', 'Safari (예전 위치)']);
+  assert.ok(by.browsers.items.every((i) => !i.path.includes('Bookmarks')));
+  assert.strictEqual(by.browsers.safety, 'safe');
+  assert.deepStrictEqual(by.mailDownloads.items.map((i) => i.name), ['A1B2']);
   assert.deepStrictEqual(by.oldDownloads.items.map((i) => i.name), ['old-thing.zip']);
   assert.deepStrictEqual(by.large.items.map((i) => i.name), ['big.mov']);
   assert.strictEqual(by.caches.safety, 'safe');
@@ -218,7 +223,7 @@ test('최적화: 맥이 알려준 정보를 올바르게 읽는다', async () =>
   fs2.writeFileSync(path.join(dir, 'com.off.agent.plist'), plist('com.off.agent', '<key>Disabled</key><true/>'));
   const read = async (f) => o.parsePlistXml(fs2.readFileSync(f, 'utf8'));
   const items = await o.listLaunchItems(dir, read, 'user');
-  assert.deepStrictEqual(items.map((i) => i.label), ['com.example.updater']);
+  assert.deepStrictEqual(items.map((i) => i.label), ['com.example.updater', 'com.mackeeper.agent']);
   assert.strictEqual(items[0].name, 'Example Updater');
   assert.strictEqual(o.friendlyName('com.google.keystone.agent', ''), 'Google Keystone');
   fs2.rmSync(path.join(dir, 'com.apple.thing.plist')); fs2.rmSync(path.join(dir, 'com.off.agent.plist'));
@@ -236,8 +241,27 @@ test('앱: 관련 파일은 이름이 정확히 같은 것만, 찌꺼기는 확�
   assert.deepStrictEqual(bundles.map((b) => path.basename(b)).sort(), ['Foo.app', 'Old Tool.app']);
 
   const app = { id: 'com.example.oldtool', name: 'Old Tool' };
-  const related = a.relatedCandidates(home, app).filter((p) => fs2.existsSync(p)).map((p) => rel(p)).sort();
-  assert.deepStrictEqual(related, ['Library/Application Support/Old Tool', 'Library/Caches/com.example.oldtool', 'Library/Preferences/com.example.oldtool.plist']);
+  const related = (await a.findRelated({ home, app })).map((r) => `${rel(r.path)} [${r.why}]`).sort();
+  assert.deepStrictEqual(related, ['Library/Application Support/Old Tool [exact]', 'Library/Caches/com.example.oldtool [exact]', 'Library/Preferences/com.example.oldtool.plist [exact]']);
+
+  // 넓힌 범위: 앱 이름으로 시작하는 것, 같은 개발사 묶음, 시스템 전체 항목
+  const mk = (p) => { fs2.mkdirSync(path.dirname(p), { recursive: true }); fs2.writeFileSync(p, 'x'); };
+  mk(path.join(home, 'Library/Containers/com.example.oldtool.helper/data'));
+  mk(path.join(home, 'Library/Caches/com.example.oldtoolkit/data')); // 이름만 비슷한 다른 앱: 포함되면 안 됨
+  mk(path.join(home, 'Library/Group Containers/ABCDE12345.oldtool/data'));
+  mk(path.join(home, 'sys/LaunchDaemons/com.example.oldtool.daemon.plist'));
+  const wide = await a.findRelated({ home, app: { ...app, team: 'ABCDE12345' }, systemLib: path.join(home, 'sys') });
+  const why = Object.fromEntries(wide.map((r) => [path.basename(r.path), r.why]));
+  assert.strictEqual(why['com.example.oldtool.helper'], 'prefix');
+  assert.strictEqual(why['ABCDE12345.oldtool'], 'team');
+  assert.strictEqual(why['com.example.oldtool.daemon.plist'], 'system');
+  assert.strictEqual(why['com.example.oldtoolkit'], undefined, '이름이 비슷할 뿐인 다른 앱의 자료는 건드리지 않음');
+  // 같은 개발사의 다른 앱이 설치돼 있으면 묶음 보관함은 그대로 둔다
+  const shared = await a.findRelated({ home, app: { ...app, team: 'ABCDE12345' }, otherTeams: ['ABCDE12345'], systemLib: path.join(home, 'sys') });
+  assert.ok(!shared.some((r) => r.why === 'team'));
+  assert.strictEqual(a.parseTeamId('Identifier=x\nTeamIdentifier=ABCDE12345\nSealed'), 'ABCDE12345');
+  assert.strictEqual(a.parseTeamId('TeamIdentifier=not set'), null);
+  for (const p of ['Library/Containers/com.example.oldtool.helper', 'Library/Caches/com.example.oldtoolkit', 'Library/Group Containers', 'sys']) fs2.rmSync(path.join(home, p), { recursive: true });
 
   // 같은 곳에서 만든 앱(com.example.*)이 설치돼 있으면 그쪽 파일은 찌꺼기로 보지 않는다
   const left = await a.findLeftovers(home, ['com.example.oldtool']);
@@ -274,6 +298,38 @@ test('파일 종류: 확장자별로 모으고, 작은 파일도 빠뜨리지 �
   assert.strictEqual(extOf('/a/b/Photo.JPG'), 'jpg');
   assert.strictEqual(extOf('/a/.zshrc'), '');
   assert.strictEqual(extOf('/a/archive.tar.gz'), 'gz');
+});
+
+test('보안 점검: 맥의 답을 올바르게 읽고, 모르는 것은 문제없음으로 보이지 않는다', async () => {
+  const sec = require('../src/core/security');
+  assert.strictEqual(sec.parseGatekeeper('assessments enabled'), true);
+  assert.strictEqual(sec.parseGatekeeper('assessments disabled'), false);
+  assert.strictEqual(sec.parseGatekeeper(''), null);
+  assert.strictEqual(sec.parseSip('System Integrity Protection status: enabled.'), true);
+  assert.strictEqual(sec.parseSip('System Integrity Protection status: disabled.'), false);
+  assert.strictEqual(sec.parseFileVault('FileVault is Off.'), false);
+  assert.strictEqual(sec.parseFirewall('Firewall is enabled. (State = 1)'), true);
+  assert.strictEqual(sec.parseFirewall('Firewall is disabled. (State = 0)'), false);
+  assert.deepStrictEqual(sec.parseProfiles('There are no configuration profiles installed for user'), []);
+  assert.deepStrictEqual(sec.parseProfiles('x[1] attribute: profileIdentifier: com.bad.profile\n'), ['com.bad.profile']);
+  assert.strictEqual(sec.parseSignature('code object is not signed at all'), 'none');
+  assert.strictEqual(sec.parseSignature('Signature=adhoc\nTeamIdentifier=not set'), 'adhoc');
+  assert.strictEqual(sec.parseSignature('Authority=Developer ID Application: X\nTeamIdentifier=ABCDE12345'), 'signed');
+
+  const sus = sec.suspiciousLaunchItems([
+    { name: 'A', label: 'com.mackeeper.agent', program: '/Applications/MacKeeper.app/x' },
+    { name: 'B', label: 'com.good.updater', program: '/Applications/Good.app/Contents/MacOS/u' },
+    { name: 'C', label: 'com.x.y', program: '/private/tmp/run.sh' },
+    { name: 'D', label: 'com.z.w', program: '/Users/me/.hidden/bin' },
+    { name: 'E', label: 'com.google.keystone', program: '/Users/me/Library/Google/GoogleSoftwareUpdate/x' },
+  ]);
+  assert.deepStrictEqual(sus.map((x) => x.name), ['A', 'C', 'D']);
+
+  // 읽지 못한 항목(null)은 결과에 넣지 않는다
+  const none = sec.securityChecks({ gatekeeper: null, sip: null, fileVault: null, firewall: null, profiles: null, suspicious: null, unsigned: null });
+  assert.deepStrictEqual(none, []);
+  const some = sec.securityChecks({ gatekeeper: false, sip: true, fileVault: false, firewall: null, profiles: ['p'], suspicious: sus, unsigned: [] });
+  assert.deepStrictEqual(some.map((c) => `${c.id}:${c.status}`), ['gatekeeper:bad', 'sip:good', 'launch:bad', 'profiles:warn', 'filevault:info', 'unsigned:good']);
 });
 
 test('폴더 크기 계산', async () => {

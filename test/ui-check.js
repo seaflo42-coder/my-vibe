@@ -41,7 +41,7 @@ const { makeHome } = require('./fixture');
 
     // 지름길: 안전한 항목 한 번에 고르기 → 중복 사본 3 + 설치 파일 1 + 캐시 1 + 로그 1
     await page.click('#safeBtn');
-    assert.match(await page.locator('#actionbar .info b').innerText(), /^6개/);
+    assert.match(await page.locator('#actionbar .info b').innerText(), /^9개/);
     await page.click('#actionbar >> text=선택 해제');
     assert.ok(await page.locator('#actionbar').isHidden());
 
@@ -198,6 +198,10 @@ const { makeHome } = require('./fixture');
     await page.click('.nav-item:has-text("최적화")');
     await page.waitForSelector('.health .cell', { timeout: 20000 });
     assert.ok(await page.locator('.health .cell').count() >= 2, '상태 점검 항목이 보여야 함');
+    // 보안 점검: 알려진 가짜 정리 프로그램 이름의 자동 실행 항목을 잡아낸다
+    await page.waitForSelector('.security .cell:has-text("수상한 자동 실행 항목")', { timeout: 20000 });
+    assert.ok((await page.locator('.security').innerText()).includes('1개 발견'), '수상한 항목 1개');
+    assert.ok((await page.locator('#main').innerText()).includes('백신이 아니에요'), '한계를 알려야 함');
     await page.waitForSelector('.procs .cell');
     assert.ok(await page.locator('.procs .cell').count() >= 1, '무거운 프로그램 목록이 보여야 함');
     await page.waitForSelector('.startup .cell:has-text("Example Updater")');

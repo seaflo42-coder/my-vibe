@@ -10,6 +10,7 @@ const { classifyFinderError, emptyTrashDir, finderTrashArgs, chunk } = require('
 const opt = require('../core/optimize');
 const filetypes = require('../core/filetypes');
 const apps = require('../core/apps');
+const sec = require('../core/security');
 const { dirSize } = require('../core/walk');
 
 let win = null;
@@ -387,7 +388,7 @@ async function readPlist(file) {
   return opt.parsePlistXml(await fsp.readFile(file, 'utf8'));
 }
 
-ipcMain.handle('opt:startup', async () => {
+async function collectStartup() {
   const items = [];
   if (IS_MAC) {
     // 로그인 항목: 맥을 켜면 함께 열리는 앱
@@ -404,8 +405,41 @@ ipcMain.handle('opt:startup', async () => {
     items.push(...await opt.listLaunchItems('/Library/LaunchAgents', readPlist, 'system'));
     items.push(...await opt.listLaunchItems('/Library/LaunchDaemons', readPlist, 'system'));
   }
+  // 수상한 항목에는 이유를 붙여 둔다 (보안 점검과 같은 기준)
+  const why = new Map(sec.suspiciousLaunchItems(items).map((s) => [s.id, s.reason]));
+  for (const it of items) if (why.has(it.id)) it.suspect = why.get(it.id);
   lastStartup = new Map(items.map((i) => [i.id, i]));
   return items;
+}
+ipcMain.handle('opt:startup', collectStartup);
+
+// 명령의 답을 성공·실패와 상관없이 그대로 읽는다 (꺼짐을 실패 코드로 알려주는 명령이 있어서)
+function runAll(cmd, args, timeout = 15000) {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (_err, out, errOut) => resolve(`${out || ''}\n${errOut || ''}`.trim()));
+  });
+}
+// 보안 점검: 맥의 기본 보호 기능과 눈에 띄는 위험 신호만 살핀다. 아무것도 바꾸지 않는다.
+ipcMain.handle('opt:security', async () => {
+  const startup = await collectStartup();
+  const input = { gatekeeper: null, sip: null, fileVault: null, firewall: null, profiles: null, unsigned: null,
+    suspicious: startup.filter((i) => i.suspect).map((i) => ({ ...i, reason: i.suspect })) };
+  if (IS_MAC) {
+    const [gk, sip, fv, fw, pf] = await Promise.all([
+      runAll('/usr/sbin/spctl', ['--status']), runAll('/usr/bin/csrutil', ['status']), runAll('/usr/bin/fdesetup', ['status']),
+      runAll('/usr/libexec/ApplicationFirewall/socketfilterfw', ['--getglobalstate']), runAll('/usr/bin/profiles', ['list']),
+    ]);
+    Object.assign(input, { gatekeeper: sec.parseGatekeeper(gk), sip: sec.parseSip(sip), fileVault: sec.parseFileVault(fv),
+      firewall: sec.parseFirewall(fw), profiles: sec.parseProfiles(pf) });
+    // 서명이 없는 앱 (말끔 자신은 뺀다)
+    const bundles = (await apps.findAppBundles(APP_DIRS())).filter((p) => !process.execPath.startsWith(p + path.sep));
+    const kinds = await mapLimit(bundles, 6, async (p) => ({ name: path.basename(p, '.app'), kind: sec.parseSignature(await runAll('/usr/bin/codesign', ['-dv', '--verbose=2', p], 20000)) }));
+    input.unsigned = kinds.filter((k) => k.kind === 'none' || k.kind === 'adhoc').sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  }
+  return sec.securityChecks(input);
+});
+ipcMain.handle('opt:openSecuritySettings', async () => {
+  if (IS_MAC) await shell.openExternal('x-apple.systempreferences:com.apple.preference.security');
 });
 
 // 자동 실행 끄기. 설정 파일을 휴지통으로 옮기므로, 다시 켜려면 휴지통에서 꺼내면 된다.
@@ -481,8 +515,8 @@ ipcMain.handle('apps:list', async () => {
     const info = await readAppInfo(p);
     // 애플 기본 앱과 말끔 자신은 목록에 넣지 않는다 (더 알아볼 필요도 없다)
     if (!apps.canRemoveApp(p, HOME, info)) return null;
-    const related = [];
-    for (const c of apps.relatedCandidates(HOME, info)) { try { await fsp.lstat(c); related.push(c); } catch { /* 없음 */ } }
+    // 관련 파일은 우선 이름으로 찾고, 개발사 묶음은 세부 확인(2단계)에서 더한다
+    const related = await apps.findRelated({ home: HOME, app: info });
     return { path: p, name: info.name, id: info.id, related };
   });
   const shown = list.filter(Boolean);
@@ -497,10 +531,16 @@ ipcMain.handle('apps:detail', async (_e, appPath) => {
   let lastUsed = null;
   if (IS_MAC) lastUsed = apps.parseMdlsDate(await run('/usr/bin/mdls', ['-name', 'kMDItemLastUsedDate', '-raw', a.path], 5000));
   const size = await sizeOf(a.path);
+  // 앱 서명에서 개발사 번호를 읽어 둔다 (같은 개발사 묶음 보관함을 찾는 데 쓴다)
+  if (IS_MAC && a.team === undefined) {
+    a.team = await new Promise((resolve) => {
+      execFile('/usr/bin/codesign', ['-dv', '--verbose=2', a.path], { timeout: 8000 }, (_err, out, stderr) => resolve(apps.parseTeamId(`${out}\n${stderr}`)));
+    });
+  }
   let relatedSize = 0;
-  for (const r of a.related) relatedSize += await sizeOf(r);
+  for (const r of a.related) { r.size = await sizeOf(r.path); relatedSize += r.size; }
   Object.assign(a, { lastUsed, size, relatedSize, unused: apps.isUnused(lastUsed) });
-  return { lastUsed, size, relatedSize, unused: a.unused };
+  return { lastUsed, size, relatedSize, unused: a.unused, related: a.related };
 });
 
 ipcMain.handle('apps:leftovers', async () => {
@@ -514,6 +554,16 @@ ipcMain.handle('apps:leftovers', async () => {
   return items;
 });
 
+// 삭제 확인 창에 보여줄 관련 파일 (개발사 묶음 보관함 포함 여부까지 반영한 최종 목록)
+ipcMain.handle('apps:related', async (_e, appPath) => {
+  const a = lastApps.get(appPath);
+  if (!a) return [];
+  const others = [...lastApps.values()].filter((x) => x.path !== a.path);
+  const teamsKnown = others.every((x) => x.team !== undefined);
+  const found = await apps.findRelated({ home: HOME, app: teamsKnown ? a : { ...a, team: null }, otherTeams: others.map((x) => x.team).filter(Boolean) });
+  return mapLimit(found, 4, async (r) => ({ ...r, size: await sizeOf(r.path) }));
+});
+
 ipcMain.handle('apps:trash', async (_e, appPath, withRelated) => {
   const a = lastApps.get(appPath);
   if (!a || !apps.canRemoveApp(a.path, HOME, a)) return { ok: false, reason: '지울 수 없는 앱이에요' };
@@ -521,7 +571,14 @@ ipcMain.handle('apps:trash', async (_e, appPath, withRelated) => {
   const running = opt.parsePs(await run('/bin/ps', ['-Aeo', 'pid,user,pcpu,rss,comm']), os.userInfo().username)
     .some((g) => g.isApp && g.name === path.basename(a.path, '.app'));
   if (running) return { ok: false, reason: '앱이 실행 중이에요. 먼저 종료한 뒤 다시 시도해 주세요.' };
-  const targets = [a.path, ...(withRelated ? a.related : [])];
+  if (withRelated) {
+    // 지우기 직전에 관련 파일을 한 번 더 찾는다. 다른 앱들의 개발사 번호가 모두 확인된 경우에만 묶음 보관함을 포함한다
+    const others = [...lastApps.values()].filter((x) => x.path !== a.path);
+    const teamsKnown = others.every((x) => x.team !== undefined);
+    const fresh = await apps.findRelated({ home: HOME, app: teamsKnown ? a : { ...a, team: null }, otherTeams: others.map((x) => x.team).filter(Boolean) });
+    a.related = fresh.map((r) => ({ ...r, size: (a.related.find((o) => o.path === r.path) || {}).size }));
+  }
+  const targets = [a.path, ...(withRelated ? a.related.map((r) => r.path) : [])];
   const res = await moveToTrash(targets);
   const appGone = res.trashed.includes(a.path);
   if (appGone) lastApps.delete(a.path);

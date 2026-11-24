@@ -67,6 +67,63 @@ function relatedCandidates(home, app) {
   return [...new Set(out)];
 }
 
+// 앱이 자료를 남기는 곳들 (사용자 라이브러리 기준)
+const RELATED_PLACES = ['Caches', 'Preferences', 'Containers', 'Application Scripts', 'HTTPStorages', 'WebKit',
+  'Saved Application State', 'Application Support', 'Logs', 'Cookies', 'LaunchAgents'];
+// 이름에서 꼬리(.plist 등)를 떼어 앱 식별 이름과 견줄 수 있게 한다
+const stripTail = (n) => n.replace(/\.(plist|savedState|binarycookies)$/, '');
+
+/** `codesign -dv` 결과에서 개발사 번호(TeamIdentifier)를 꺼낸다. 없으면 null. */
+function parseTeamId(text) {
+  const m = String(text || '').match(/TeamIdentifier=([A-Z0-9]{10})\b/);
+  return m ? m[1] : null;
+}
+
+/**
+ * 앱 하나와 함께 지워도 되는 관련 파일을, **왜 이 앱 것이라고 봤는지**와 함께 찾는다.
+ *  - exact : 이름이 앱 식별 이름(또는 앱 이름)과 정확히 같음
+ *  - prefix: 앱 식별 이름으로 시작함 (예: com.회사.앱.helper)
+ *  - team  : 같은 개발사 묶음 보관함. 그 개발사의 다른 앱이 설치돼 있으면 건드리지 않는다
+ *  - system: 시스템 전체에 설치된 것 (지울 때 맥이 암호를 물을 수 있음)
+ * @param {object} o
+ * @param {string} o.home
+ * @param {{id:string|null,name:string,team?:string|null}} o.app
+ * @param {string[]} [o.otherTeams] 설치된 다른 앱들의 개발사 번호
+ * @param {string} [o.systemLib]   시스템 라이브러리 위치 (시험할 때 바꿔 넣는다)
+ */
+async function findRelated({ home, app, otherTeams = [], systemLib = '/Library' }) {
+  const lib = path.join(home, 'Library');
+  const found = new Map(); // 경로 → { path, why }
+  const add = (p, why) => { if (!found.has(p)) found.set(p, { path: p, why }); };
+  const list = async (dir) => { try { return await fsp.readdir(dir); } catch { return []; } };
+
+  for (const sub of RELATED_PLACES) {
+    for (const n of await list(path.join(lib, sub))) {
+      const id = stripTail(n);
+      const p = path.join(lib, sub, n);
+      if (app.id && id === app.id) add(p, 'exact');
+      else if (app.id && isBundleIdLike(app.id) && id.startsWith(app.id + '.')) add(p, 'prefix');
+      else if (app.name && app.name.length >= 3 && n === app.name && ['Application Support', 'Logs', 'Caches'].includes(sub)) add(p, 'exact');
+    }
+  }
+  // 같은 개발사 묶음 보관함: 그 개발사의 다른 앱이 하나도 없을 때만
+  if (app.team && !otherTeams.includes(app.team)) {
+    for (const n of await list(path.join(lib, 'Group Containers'))) {
+      if (n.startsWith(app.team + '.')) add(path.join(lib, 'Group Containers', n), 'team');
+    }
+  }
+  // 시스템 전체에 설치된 자동 실행 항목과 도우미
+  if (app.id && isBundleIdLike(app.id)) {
+    for (const sub of ['LaunchAgents', 'LaunchDaemons', 'PrivilegedHelperTools']) {
+      for (const n of await list(path.join(systemLib, sub))) {
+        const id = stripTail(n);
+        if (id === app.id || id.startsWith(app.id + '.')) add(path.join(systemLib, sub, n), 'system');
+      }
+    }
+  }
+  return [...found.values()];
+}
+
 const LEFTOVER_PLACES = [
   ['Caches', '임시 파일'], ['Application Support', '앱 자료'], ['Containers', '앱 보관함'], ['Saved Application State', '창 상태'],
   ['HTTPStorages', '웹 저장소'], ['WebKit', '웹 저장소'], ['Preferences', '설정'],
@@ -115,4 +172,4 @@ function canRemoveApp(appPath, home, app) {
   return true;
 }
 
-module.exports = { parseInfoPlistXml, parseMdlsDate, isBundleIdLike, vendorOf, findAppBundles, relatedCandidates, findLeftovers, isUnused, canRemoveApp, UNUSED_DAYS };
+module.exports = { findRelated, parseTeamId, parseInfoPlistXml, parseMdlsDate, isBundleIdLike, vendorOf, findAppBundles, relatedCandidates, findLeftovers, isUnused, canRemoveApp, UNUSED_DAYS };
