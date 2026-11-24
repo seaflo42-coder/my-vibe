@@ -245,15 +245,19 @@
       res = { trashed: [], failed: [], freed: 0, crashed: true };
     }
     S.busy = false; endNotice();
+    let stay = false;
     applyTrashed(res.trashed, res.freed);
     if (S.result && res.trashed.length) { try { S.result.types = await api.typesSummary(); } catch { /* 그대로 둠 */ } T.key = null; }
     if (res.trashed.length) {
       const prev = S.done && !S.done.emptied ? S.done : { count: 0, freed: 0, freeBefore };
       S.done = { count: prev.count + res.trashed.length, freed: prev.freed + res.freed, freeBefore: prev.freeBefore, emptied: false, freeAfter: null };
-      S.view = 'home'; S.animate = true;
+      // 파일 종류 탭에서는 하던 자리에서 계속 고를 수 있게 그대로 둔다. 그 밖에는 저장공간 화면에서 결과를 보여준다
+      if (S.view === 'types') stay = true;
+      else { S.view = 'home'; S.animate = true; }
     }
     render();
-    $('main').scrollTop = 0;
+    if (stay) toast(`${nf.format(res.trashed.length)}개 항목을 휴지통으로 옮겼어요 (${fmt(res.freed)}). 휴지통을 비우면 공간이 확보돼요.`, { label: '휴지통 비우기', run: emptyTrash });
+    else $('main').scrollTop = 0;
     if (res.crashed) {
       await modal({ glyph: 'alert', tone: 'warn', title: '옮기는 중 문제가 생겼어요', body: '아무것도 지워지지 않았어요. 다시 검사한 뒤 시도해 주세요.', confirm: '확인', cancel: null });
     } else if (res.failed.length) {

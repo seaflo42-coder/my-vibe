@@ -151,7 +151,10 @@ const { makeHome } = require('./fixture');
     await shot('9b-types-picked');
     await page.click('#trashBtn');
     await page.click('.modal .btn.primary');
-    await page.waitForSelector('.result:has-text("휴지통으로 옮겼어요")', { timeout: 30000 });
+    // 옮긴 뒤에도 파일 종류 탭에 그대로 머문다 (저장공간 화면으로 튀지 않음)
+    await page.waitForSelector('.toast:has-text("3개 항목을 휴지통으로 옮겼어요")', { timeout: 30000 });
+    assert.ok(await page.locator('.nav-item[aria-current="page"]:has-text("파일 종류"), .nav-item.on:has-text("파일 종류"), .nav-item.active:has-text("파일 종류")').count(), '파일 종류 탭에 머물러야 함');
+    assert.ok(await page.locator('.browser.types').count(), '파일 종류 화면이 그대로 보여야 함');
     for (const f of ['logo.ai', 'poster.psd', 'icon.eps']) assert.ok(!fs.existsSync(path.join(home, 'Documents/design', f)), f + ' 는 옮겨져야 함');
     assert.ok(fs.existsSync(path.join(home, 'Movies/clip.mp4')), '고르지 않은 종류는 그대로');
     await page.click('.nav-item:has-text("파일 종류")');
