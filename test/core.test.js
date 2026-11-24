@@ -256,6 +256,26 @@ test('앱: 관련 파일은 이름이 정확히 같은 것만, 찌꺼기는 확�
   assert.strictEqual(a.canRemoveApp('/Applications/Malkkeum.app', home, { id: 'com.seaflo42.malkkeum' }), false, '말끔 자신은 지우지 않음');
 });
 
+test('파일 종류: 확장자별로 모으고, 작은 파일도 빠뜨리지 않는다', () => {
+  const t = result.types;
+  assert.deepStrictEqual(t.ai, { count: 1, size: 200 * 1000 });
+  assert.deepStrictEqual(t.eps, { count: 1, size: 20 * 1000 }, '100KB보다 작아도 찾아야 함');
+  assert.strictEqual(t.psd.count, 1);
+  assert.strictEqual(t.mp4.count, 1);
+  assert.strictEqual(t.mov.count, 1);
+  assert.strictEqual(t.zip.count, 2);
+  assert.strictEqual(t.txt.count, 2);
+  assert.strictEqual(t.bin, undefined, '목록에 없는 확장자는 모으지 않음');
+  assert.deepStrictEqual(result.typeFiles.eps.map((f) => rel(f.path)), ['Documents/design/icon.eps']);
+  // 앱·보관함·숨김·Library 안의 파일은 여기에도 나오지 않는다
+  const all = Object.values(result.typeFiles).flat().map((f) => rel(f.path));
+  assert.ok(!all.some((p) => p.startsWith('Library/') || p.includes('.app/') || p.startsWith('.')));
+  const { extOf } = require('../src/core/filetypes');
+  assert.strictEqual(extOf('/a/b/Photo.JPG'), 'jpg');
+  assert.strictEqual(extOf('/a/.zshrc'), '');
+  assert.strictEqual(extOf('/a/archive.tar.gz'), 'gz');
+});
+
 test('폴더 크기 계산', async () => {
   const { size } = await dirSize(path.join(home, 'Library/Caches/com.example.app'));
   assert.strictEqual(size, 2 * MB);

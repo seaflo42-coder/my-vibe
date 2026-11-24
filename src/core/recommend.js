@@ -67,7 +67,7 @@ async function buildRecommendations({ home, files, now = Date.now(), useBirthtim
   // 2) 설치 파일
   step('설치 파일');
   const installers = files
-    .filter((f) => INSTALLER_EXTS.has(path.extname(f.path).toLowerCase()) && !f.cloudOnly)
+    .filter((f) => f.size >= 100 * 1000 && INSTALLER_EXTS.has(path.extname(f.path).toLowerCase()) && !f.cloudOnly)
     .map((f) => ({ path: f.path, name: path.basename(f.path), size: f.size, mtimeMs: f.mtimeMs }))
     .sort((a, b) => b.size - a.size);
   installers.forEach((i) => used.add(i.path));

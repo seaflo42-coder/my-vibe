@@ -4,6 +4,7 @@ const path = require('path');
 const { walk } = require('./walk');
 const { findDuplicates, pickOriginal } = require('./duplicates');
 const { buildRecommendations } = require('./recommend');
+const { TYPE_GROUPS, EXT_SET, indexByType, summarize } = require('./filetypes');
 
 const KEEP_MIN = 100 * 1000; // 이보다 작은 파일은 정리 효과가 거의 없어 기억하지 않음
 const MAX_GROUPS = 1500;
@@ -16,6 +17,7 @@ async function runScan({ home, roots, minDupSize = 1000 * 1000, useBirthtime = t
     roots: scanRoots,
     skipPaths: [path.join(home, 'Library')],
     minSize: KEEP_MIN,
+    keepExts: EXT_SET, // 확장자로 찾을 수 있는 파일은 작아도 기억해 둔다
     onFile: (f) => files.push(f),
     onProgress: (p) => onProgress({ phase: 'walk', ...p }),
     isCancelled,
@@ -37,9 +39,16 @@ async function runScan({ home, roots, minDupSize = 1000 * 1000, useBirthtime = t
   if (isCancelled()) return null;
 
   const slim = (f) => ({ path: f.path, size: f.size, mtimeMs: f.mtimeMs });
+  // 확장자별 묶음: 화면에는 요약만 보내고, 파일 목록은 앱 본체가 갖고 있다가 필요한 만큼만 건넨다
+  const byExt = indexByType(files);
+  const typeFiles = {};
+  for (const [e, arr] of byExt) typeFiles[e] = arr.map(slim);
   const groups = allGroups.slice(0, MAX_GROUPS).map((g) => ({ ...g, keep: pickOriginal(g.files).path, files: g.files.map(slim) }));
   return {
     roots: scanRoots,
+    typeGroups: TYPE_GROUPS,
+    types: summarize(byExt),
+    typeFiles,
     groups,
     categories,
     summary: {

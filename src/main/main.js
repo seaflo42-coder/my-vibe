@@ -8,13 +8,14 @@ const { Worker } = require('worker_threads');
 const { validateDeletion } = require('../core/safety');
 const { classifyFinderError, emptyTrashDir, finderTrashArgs, chunk } = require('../core/trash');
 const opt = require('../core/optimize');
+const filetypes = require('../core/filetypes');
 const apps = require('../core/apps');
 const { dirSize } = require('../core/walk');
 
 let win = null;
 let worker = null;
 // 마지막 검사 결과에서 "지워도 되는 후보"로 나온 항목만 기억해 둔다 (삭제 허용 목록)
-let lastScan = { roots: [], known: new Map(), dupGroups: [] };
+let lastScan = { roots: [], known: new Map(), dupGroups: [], typeFiles: new Map() };
 
 const HOME = os.homedir();
 const IS_MAC = process.platform === 'darwin';
@@ -74,7 +75,10 @@ function rememberScan(result) {
   for (const c of result.categories) {
     for (const i of c.items) known.set(i.path, { size: i.size, mtimeMs: i.mtimeMs, isDir: !!i.isDir });
   }
-  lastScan = { roots: result.roots, known, dupGroups: result.groups };
+  // 확장자별 파일 목록은 앱 본체가 갖고 있다가, 화면이 달라는 만큼만 건넨다
+  const typeFiles = new Map(Object.entries(result.typeFiles || {}));
+  delete result.typeFiles;
+  lastScan = { roots: result.roots, known, dupGroups: result.groups, typeFiles };
 }
 
 ipcMain.handle('disk:info', async () => {
@@ -190,6 +194,15 @@ ipcMain.handle('files:trash', async (_e, paths) => {
     if (k) freed += k.size;
     lastScan.known.delete(p);
   }
+  // 옮긴 파일을 확장자 목록에서도 뺀다
+  if (trashed.length && lastScan.typeFiles.size) {
+    const gone = new Set(trashed);
+    for (const [e, arr] of lastScan.typeFiles) {
+      const left = arr.filter((f) => !gone.has(f.path));
+      if (left.length) lastScan.typeFiles.set(e, left); else lastScan.typeFiles.delete(e);
+    }
+    typedCache = null;
+  }
   // 옮긴 파일을 중복 묶음에서 빼고, 사본이 하나만 남은 묶음은 없앤다
   if (trashed.length) {
     const goneNow = (m) => trashed.some((t) => m === t || m.startsWith(t + path.sep));
@@ -269,6 +282,48 @@ ipcMain.handle('app:openAutomationSettings', async () => {
   if (IS_MAC) await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Automation');
   return true;
 });
+
+// ---------- 파일 종류: 확장자로 찾기 ----------
+const baseName = (p) => p.slice(p.lastIndexOf('/') + 1);
+const koCollator = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
+let typedCache = null; // 같은 조건으로 다시 물으면 정렬을 또 하지 않는다
+function typedFiles({ exts, query, sort }) {
+  const list = (Array.isArray(exts) ? exts : []).filter((e) => typeof e === 'string' && filetypes.EXT_SET.has(e)).sort();
+  const q = typeof query === 'string' ? query.trim().toLowerCase() : '';
+  const key = JSON.stringify([list, q, sort || null]);
+  if (typedCache && typedCache.key === key) return typedCache.files;
+  let files = [];
+  for (const e of list) {
+    for (const f of lastScan.typeFiles.get(e) || []) {
+      if (!q || f.path.toLowerCase().includes(q)) files.push(f);
+    }
+  }
+  if (sort) {
+    const dir = sort.dir > 0 ? 1 : -1;
+    const by = sort.key === 'name' ? (a, b) => koCollator.compare(baseName(a.path), baseName(b.path))
+      : sort.key === 'kind' ? (a, b) => filetypes.extOf(a.path).localeCompare(filetypes.extOf(b.path)) || koCollator.compare(baseName(a.path), baseName(b.path))
+        : sort.key === 'date' ? (a, b) => a.mtimeMs - b.mtimeMs : (a, b) => a.size - b.size;
+    files = files.sort((a, b) => by(a, b) * dir);
+  }
+  typedCache = { key, files };
+  return files;
+}
+// 화면에 건넨 파일만 '지워도 되는 후보'로 기억한다
+const rememberTyped = (files) => { for (const f of files) if (!lastScan.known.has(f.path)) lastScan.known.set(f.path, { size: f.size, mtimeMs: f.mtimeMs }); };
+
+ipcMain.handle('types:list', (_e, o = {}) => {
+  const files = typedFiles(o);
+  const limit = Math.min(5000, Math.max(1, Number(o.limit) || 100));
+  const items = files.slice(0, limit);
+  rememberTyped(items);
+  return { items, total: files.length, totalSize: files.reduce((n, f) => n + f.size, 0) };
+});
+ipcMain.handle('types:all', (_e, o = {}) => {
+  const files = typedFiles({ exts: o.exts, query: o.query, sort: null });
+  rememberTyped(files);
+  return files.map((f) => [f.path, f.size]);
+});
+ipcMain.handle('types:summary', () => filetypes.summarize(lastScan.typeFiles));
 
 // ---------- 최적화 ----------
 // 명령을 실행해 결과 글자를 돌려준다. 실패하면 빈 글자 (없는 명령이거나 권한이 없는 경우).

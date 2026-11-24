@@ -51,6 +51,11 @@ function makeHome() {
   write(path.join(home, 'Library/Logs/app.log'), crypto.randomBytes(2 * MB));
   write(path.join(home, 'Library/Preferences/keep.plist'), a);
   write(path.join(home, '.Trash/junk.bin'), crypto.randomBytes(1 * MB));
+  // 파일 종류 탭 확인용: 디자인·동영상 파일 (작은 것도 찾아야 한다)
+  write(path.join(home, 'Documents/design/logo.ai'), crypto.randomBytes(200 * 1000));
+  write(path.join(home, 'Documents/design/poster.psd'), crypto.randomBytes(1500 * 1000));
+  write(path.join(home, 'Documents/design/icon.eps'), crypto.randomBytes(20 * 1000));
+  write(path.join(home, 'Movies/clip.mp4'), crypto.randomBytes(1200 * 1000));
   // 앱 탭 확인용: 오래 안 쓴 앱 하나와 그 관련 파일, 그리고 이미 지운 앱이 남긴 파일
   write(path.join(home, 'Applications/Old Tool.app/Contents/Info.plist'),
     '<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier</key><string>com.example.oldtool</string><key>CFBundleName</key><string>Old Tool</string></dict></plist>');

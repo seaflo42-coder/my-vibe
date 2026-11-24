@@ -23,11 +23,12 @@ function isPackageDir(name) {
  * @param {string[]} o.roots     살펴볼 폴더들
  * @param {string[]} [o.skipPaths] 통째로 건너뛸 절대 경로
  * @param {number} [o.minSize]   이 크기 미만 파일은 보고하지 않음
+ * @param {Set<string>} [o.keepExts] 이 확장자의 파일은 크기가 작아도 보고함
  * @param {(f:object)=>void} o.onFile
  * @param {(p:object)=>void} [o.onProgress]
  * @param {()=>boolean} [o.isCancelled]
  */
-async function walk({ roots, skipPaths = [], minSize = 0, onFile, onProgress, isCancelled }) {
+async function walk({ roots, skipPaths = [], minSize = 0, keepExts, onFile, onProgress, isCancelled }) {
   const skip = new Set(skipPaths.map((p) => path.resolve(p)));
   const seenDirs = new Set();
   const stack = [];
@@ -71,7 +72,10 @@ async function walk({ roots, skipPaths = [], minSize = 0, onFile, onProgress, is
         if (!st || !st.isFile()) continue;
         stats.files++;
         stats.bytes += st.size;
-        if (st.size < minSize) continue;
+        if (st.size < minSize) {
+          const n = chunk[j]; const dot = n.lastIndexOf('.');
+          if (!keepExts || dot <= 0 || !keepExts.has(n.slice(dot + 1).toLowerCase())) continue;
+        }
         onFile({
           path: path.join(dir, chunk[j]),
           size: st.size,

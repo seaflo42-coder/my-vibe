@@ -126,6 +126,38 @@ const { makeHome } = require('./fixture');
     assert.ok(fs.existsSync(path.join(home, 'Library/Preferences/keep.plist')));
     await page.click('.nav-item:has-text("중복 파일")');
     assert.strictEqual(await page.locator('.group').count(), 0);
+    // 파일 종류 탭: 확장자를 골라 찾고, 골라서 휴지통으로
+    await page.click('.nav-item:has-text("파일 종류")');
+    await page.waitForSelector('.typepick .tchip[data-ext="psd"]');
+    assert.ok(await page.locator('.tchip[data-ext="eps"]').isVisible(), '작은 eps 파일도 찾아야 함');
+    await page.click('.tchip[data-ext="psd"]');
+    await page.click('.tchip[data-ext="eps"]');
+    await page.click('.tchip[data-ext="ai"]');
+    await page.waitForSelector('.typelist .row:not(.head)');
+    assert.strictEqual(await page.locator('.typelist .row:not(.head)').count(), 3);
+    assert.match(await page.locator('.typelist .row:not(.head) .name').first().innerText(), /poster\.psd/, '큰 순서로 정렬');
+    await page.waitForTimeout(500);
+    await shot('9-types');
+    // 검색으로 좁히기 (앞에서 검색 칸을 열어 둔 상태면 그대로 쓴다)
+    if (!(await page.locator('#searchBox.open').count())) await page.click('#searchBtn');
+    await page.fill('#searchInput', 'logo');
+    await page.waitForFunction(() => document.querySelectorAll('.typelist .row:not(.head)').length === 1);
+    await page.click('#searchClear');
+    await page.waitForFunction(() => document.querySelectorAll('.typelist .row:not(.head)').length === 3);
+    // 모두 고르기 → 휴지통
+    await page.click('#typeAll');
+    assert.match(await page.locator('#actionbar .info b').innerText(), /^3개/);
+    await page.waitForTimeout(400);
+    await shot('9b-types-picked');
+    await page.click('#trashBtn');
+    await page.click('.modal .btn.primary');
+    await page.waitForSelector('.result:has-text("휴지통으로 옮겼어요")', { timeout: 30000 });
+    for (const f of ['logo.ai', 'poster.psd', 'icon.eps']) assert.ok(!fs.existsSync(path.join(home, 'Documents/design', f)), f + ' 는 옮겨져야 함');
+    assert.ok(fs.existsSync(path.join(home, 'Movies/clip.mp4')), '고르지 않은 종류는 그대로');
+    await page.click('.nav-item:has-text("파일 종류")');
+    assert.strictEqual(await page.locator('.tchip[data-ext="psd"]').count(), 0, '옮긴 뒤에는 목록에서 사라짐');
+    assert.ok(await page.locator('.tchip[data-ext="mp4"]').isVisible());
+
     // 앱 탭: 안 쓰는 앱과, 지운 앱이 남긴 파일
     await page.click('.nav-item:has-text("앱")');
     await page.waitForSelector('.applist .cell:has-text("Old Tool")', { timeout: 60000 });
