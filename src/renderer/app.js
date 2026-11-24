@@ -1253,10 +1253,11 @@
     toast(`${what} 휴지통으로 옮겼어요${freed ? ` (${fmt(freed)})` : ''}. 휴지통을 비우면 공간이 확보돼요.`, { label: '휴지통 비우기', run: emptyTrash });
   }
   async function removeApp(a) {
-    if (A.busy) return;
-    // 지우기 전에 이 앱이 남긴 파일을 한 번 더 꼼꼼히 찾는다
+    if (A.busy || A.asking) return;
+    // 지우기 전에 이 앱이 남긴 파일을 한 번 더 꼼꼼히 찾는다 (찾는 동안 다시 눌러도 창이 겹치지 않게)
+    A.asking = true;
     let related = a.related || [];
-    try { related = await api.appsRelated(a.path); } catch { /* 앞서 찾은 목록을 쓴다 */ }
+    try { related = await api.appsRelated(a.path); } catch { /* 앞서 찾은 목록을 쓴다 */ } finally { A.asking = false; }
     a.related = related;
     const hasRelated = related.length > 0;
     const relSize = related.reduce((n, r) => n + (r.size || 0), 0);

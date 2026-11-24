@@ -185,6 +185,7 @@ const { makeHome } = require('./fixture');
     assert.ok(fs.existsSync(path.join(home, 'Library/Caches/com.example.oldtool')), '설치된 앱의 파일은 그대로');
     // 앱 삭제: 관련 파일 목록을 보여주고, 함께 옮긴다
     await page.click('.applist .cell:has-text("Old Tool") >> text=삭제…');
+    await page.waitForSelector('.modal li', { timeout: 20000 });
     assert.strictEqual(await page.locator('.modal li').count(), 3);
     await page.waitForTimeout(500);
     await shot('8b-app-remove');
